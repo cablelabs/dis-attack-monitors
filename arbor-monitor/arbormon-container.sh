@@ -452,7 +452,7 @@ function docker-run()
         debug_opt="--debug"
     fi
 
-    docker_run_params=(python3.6 /app/arbor-monitor
+    docker_run_params=(python3.6 /app/dis-arbor-monitor.py
                               $debug_opt
                               --bind-port "$bind_port"
                               $webhook_token_opt
