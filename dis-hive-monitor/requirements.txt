@@ -1,0 +1,33 @@
+#
+# Output generated via "pipdeptree -f > requirements.txt"
+#
+
+# Example env setup using venv package:
+#
+#   python3 -m venv --copies venv
+#   source venv/bin/activate
+#   pip install -r requirements.txt
+#
+
+aiohttp==3.10.9
+  aiohappyeyeballs==2.4.3
+  aiosignal==1.3.1
+    frozenlist==1.4.1
+  async-timeout==4.0.3
+  attrs==24.2.0
+  frozenlist==1.4.1
+  multidict==6.1.0
+    typing_extensions==4.12.2
+  yarl==1.13.1
+    idna==3.10
+    multidict==6.1.0
+      typing_extensions==4.12.2
+mysql-connector-python==9.0.0
+pipdeptree==2.23.4
+  packaging==24.1
+  pip==24.2
+setuptools==58.1.0
+websockets_proxy==0.1.0
+  python-socks==2.4.4
+  websockets==11.0.3
+wheel==0.44.0
