@@ -26,7 +26,6 @@ class ArborWsApiTrafficMonitor(TrafficMonitorBase):
         self.arborws_url_prefix = args.arborws_url_prefix
         self.arborws_api_key = args.arborws_api_key
         self.arborws_api_insecure = args.arborws_api_insecure
-        self.min_attack_dur_s = args.arborws_min_dur_s
         self.initial_scan_delay_s = 10
         self.scan_period_s = args.arborws_scan_period_s
         self.scan_overlap_s = args.arborws_scan_overlap_s
@@ -43,6 +42,7 @@ class ArborWsApiTrafficMonitor(TrafficMonitorBase):
     async def startup(self, event_loop):
         self.event_loop = event_loop
         self.logger.debug(f"ArborWsApiTrafficMonitor: Performing startup")
+        # TODO: Check connectivity and credentials to the Arbor system
         self.arborws_scan_task = event_loop.create_task(self._periodic_arbor_forensics_scan())
 
     def register_traffic_found_callback(self, callback: Callable[[dict], Awaitable[None]]):
@@ -129,7 +129,6 @@ class ArborWsApiTrafficMonitor(TrafficMonitorBase):
             except Exception as ex:
                 self.logger.info(f"  {attack_id:>8} {str(attack_entry['srcNetwork']):<20} {attack_entry['destPort']:<5} "
                                  f"{ex}")
-
 
     def _create_observation_report(self, attack_tracking_table):
         observed_forgery_list = []
