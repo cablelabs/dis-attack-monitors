@@ -52,7 +52,30 @@ arg_parser.add_argument('--report-status-interval', "-rsi", required=False, acti
                              "(or DIS_HIVEMON_STATUS_REPORT_INTERVAL_S) (0: disabled)")
 arg_parser.add_argument('--dump-list-updates', "-du", required=False, action='store_true',
                         default=False, help="Print the complete attack list after every update message.")
-
+arg_parser.add_argument('--drop-routers', "-dr", required=False, action='store', type=str,
+                        default=os.environ.get('DIS_HIVEMON_DROP_ROUTERS'), dest="drop_routers",
+                        help="Specify a list of one or more router names and/or IP addresses, separated with commas, "
+                             f"to skip for forged traffic scanning and reporting (or DIS_HIVEMON_DROP_ROUTERS).")
+arg_parser.add_argument('--drop-interface-types', "-dit", required=False, action='store', type=str,
+                        default=os.environ.get('DIS_HIVEMON_DROP_INT_TYPES'), dest="drop_interface_types",
+                        help="Specify a list of one or more interface type strings, separated with commas, "
+                             f"to skip for forged traffic scanning and reporting (or DIS_HIVEMON_DROP_INT_TYPES).")
+arg_parser.add_argument('--only-interface-types', "-oit", required=False, action='store', type=str,
+                        default=os.environ.get('DIS_HIVEMON_ONLY_INT_TYPES'), dest="only_interface_types",
+                        help="Specify a list of one or more interface type strings, separated with commas, "
+                             f"to scan for forged traffic scanning and reporting (or DIS_HIVEMON_ONLY_INT_TYPES).")
+arg_parser.add_argument('--drop-interface-asns', "-diasn", required=False, action='store', type=str,
+                        default=os.environ.get('DIS_HIVEMON_DROP_INTERFACE_ASNS'), dest="drop_interface_asns",
+                        help="Specify a list of interfaces, by ASN, to skip for forged traffic scanning and  "
+                             f"reporting (or DIS_HIVEMON_DROP_ROUTER_NAMES).")
+arg_parser.add_argument('--drop-interface-regex', "-dir", required=False, action='store', type=str,
+                        default=os.environ.get('DIS_HIVEMON_DROP_INT_REGEX'), dest="drop_interface_regex",
+                        help="Skip scanning router interfaces with SNMP description strings which match the "
+                             f"designated regular expression. (or DIS_HIVEMON_DROP_INT_REGEX).")
+arg_parser.add_argument('--only-interface-regex', "-oir", required=False, action='store', type=str,
+                        default=os.environ.get('DIS_HIVEMON_ONLY_INT_REGEX'), dest="only_interface_regex",
+                        help="Only scan router interfaces with SNMP description strings which match the "
+                             f"designated regular expression. (or DIS_HIVEMON_ONLY_INT_REGEX).")
 #
 # HIVE connection options
 #
@@ -122,23 +145,30 @@ ex_asn_group.add_argument('--int-desc-asn-lookup-file', "-idlfile", required=Fal
                           default=os.environ.get('DIS_HIVEMON_INT_DESC_LOOKUP_FILE'), dest="int_desc_lookup_file",
                           help="Specify the file containing a list of ruleset used to determine ASN names "
                                "from interface descriptions (or set DIS_HIVEMON_INT_DESC_LOOKUP_FILE)")
-
 #
 # Observed forged traffic report storing/forwarding options
 #
 reporting_options = arg_parser.add_argument_group(
                          title="Options for the storing and forwarding of Observed Forged Source Traffic Reports")
-arg_parser.add_argument ('--report-store-dir', "-repd", required=False, action='store', type=str,
+arg_default=os.environ.get('DIS_ARBORMON_REPORT_API_URI')
+reporting_options.add_argument('--report-consumer-api-uri', "-rcuri", required=False, action='store', type=str,
+                               default=os.environ.get('DIS_HIVEMON_REPORT_API_URI'), metavar="report_api_uri",
+                               help="Specify the API prefix of the DIS server to submit DIS Forged Address "
+                                    "Source Traceback (FAST) reports (or DIS_HIVEMON_REPORT_API_URI)")
+reporting_options.add_argument('--report-consumer-api-key', "-rckey", required=False, action='store', type=str,
+                               default=os.environ.get('DIS_HIVEMON_REPORT_API_KEY'), metavar="report_api_key",
+                               help="Specify the API key to use for submitting DIS FAST reports "
+                                    "(or DIS_HIVEMON_REPORT_API_KEY)")
+reporting_options.add_argument ('--report-store-dir', "-repd", required=False, action='store', type=str,
                          default=os.environ.get('DIS_HIVEMON_REPORT_STORE_DIR'), dest="report_store_dir",
                          help="Specify a directory to store generated Observed Forged Source Traffic Reports reports "
                               "(or DIS_HIVEMON_REPORT_STORE_DIR)")
-storage_format_choices=["only-source-attributes","all-attributes"]
-arg_parser.add_argument ('--report-store-format', "-repf", required=False, action='store', type=str,
+storage_format_choices=["only-source-attributes", "all-attributes"]
+reporting_options.add_argument ('--report-store-format', "-repf", required=False, action='store', type=str,
                          default=os.environ.get('DIS_HIVEMON_REPORT_STORE_FORMAT', "only-source-attributes"),
                          dest="report_store_format", choices=storage_format_choices,
                          help="Specify the report options for writing Observed Forged Source Traffic Reports reports "
                               f"(or DIS_HIVEMON_REPORT_STORE_FORMAT). One of {storage_format_choices}")
-
 #
 # NetFlow SQL Capture Options (nfacctd schema)
 #
