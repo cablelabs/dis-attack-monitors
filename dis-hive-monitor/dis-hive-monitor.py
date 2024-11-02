@@ -240,11 +240,18 @@ arborws_group.add_argument('--arbor-ws-api-insecure', "-aai", required=False, de
                            action='store_true', default=os.environ.get('DIS_HIVEMON_ARBORWS_API_INSECURE'),
                            help="Disable cert checks when invoking Arbor SP API REST calls against https URI prefixes "
                                 "(or DIS_HIVEMON_ARBORWS_API_INSECURE)")
-arborws_group.add_argument('--arbor-ws-api-scan-period', "-awsasp", required=False, dest="arborws_scan_period_s",
-                           action='store', type=int, default=os.environ.get('DIS_HIVEMON_ARBORWS_SCAN_PERIOD_S'),
+# TODO: Add support for multi-unit value parsing (e.g. "30s", "30m", "2h", "12h", "2d")
+arborws_group.add_argument('--arbor-ws-api-router-scan-period', "-awsrasp", required=False,
+                           dest="arborws_router_scan_period_s", action='store', type=int,
+                           default=os.environ.get('DIS_HIVEMON_ARBORWS_ROUTER_SCAN_PERIOD_S', 600),
+                           help="The period to scan the Arbor router and interfce APIs for metadata (in seconds)")
+arborws_group.add_argument('--arbor-ws-api-forensics-scan-period', "-awsfasp", required=False,
+                           dest="arborws_forensics_scan_period_s", action='store', type=int,
+                           default=os.environ.get('DIS_HIVEMON_ARBORWS_FORENSICS_SCAN_PERIOD_S'),
                            help="The period to check the Arbor forensics API for HIVE-signalled attacks (in seconds)")
-arborws_group.add_argument('--arbor-ws-api-scan-overlap', "-awsaso", required=False, dest="arborws_scan_overlap_s",
-                           action='store', type=int, default=os.environ.get('DIS_HIVEMON_ARBORWS_SCAN_OVERLAP_S', 240),
+arborws_group.add_argument('--arbor-ws-api-forensics-scan-overlap', "-awsfaso", required=False,
+                           dest="arborws_forensics_scan_overlap_s", action='store', type=int,
+                           default=os.environ.get('DIS_HIVEMON_ARBORWS_FORENSICS_SCAN_OVERLAP_S', 240),
                            help="The amount of time, in seconds, to check before the scan period to pickup latent "
                                 "entries in the flow scan (default 240)")
 
@@ -284,7 +291,8 @@ hive_monitor = None
 # Determine which capture monitor to instantiate based on the supplied parameters
 capture_monitor = None
 arborws_params = args.arborws_url_prefix or args.arborws_api_key or args.arborws_api_insecure \
-                 or args.arborws_scan_period_s
+                 or args.arborws_forensics_scan_period_s or args.arborws_router_scan_period_s \
+                 or args.arborws_forensics_scan_overlap_s
 nfsql_params = args.nfsql_db_host or args.nfsql_db_port or args.nfsql_db_name or args.nfsql_db_user \
                or args.nfsql_db_pass or args.nfsql_router_list_file or args.nfsql_nfacctd_mapreload_cmd
 asn_res_params = args.int_name_regex or args.int_name_regex or args.int_name_lookup_file or args.int_desc_regex
@@ -317,10 +325,11 @@ if arborws_params:
         exit(1)
 
 if arborws_params:
-    if not args.arborws_scan_period_s:
-        args.arborws_scan_period_s = 60
+    if not args.arborws_forensics_scan_period_s:
+        args.arborws_forensics_scan_period_s = 60
     if not args.arborws_api_insecure:
         args.arborws_api_insecure = False
+
 
 event_loop = None
 
