@@ -109,9 +109,9 @@ class ArborWsApiTrafficMonitor(TrafficMonitorBase):
 
     async def _dump_attack_tracking_entries(self, attack_tracking_table, desc_string=""):
         self.logger.info(f"DUMPING {len(attack_tracking_table)} {desc_string}ATTACK TRACKING ENTRIES")
-        self.logger.info(f" ATTACK ID SRC NETWORK          DPORT     START TIME     DURATION       END TIME MATCHES  PACKETS          ROUTER     INT        ASN #DESTS")
-        cur_time = int(time.time())
         async with self.router_info_lock:
+            self.logger.info(f" ATTACK ID SRC NETWORK          DPORT     START TIME     DURATION       END TIME MATCHES  PACKETS          ROUTER     INT        ASN #DESTS")
+            cur_time = int(time.time())
             for (attack_id, router_gid, interface_index), attack_tracking_entry in attack_tracking_table.items():
                 try:
                     attack_entry = self.attack_table[attack_id]
@@ -130,13 +130,13 @@ class ArborWsApiTrafficMonitor(TrafficMonitorBase):
                     ets = attack_entry.get('endTime')
                     et = dt.datetime.utcfromtimestamp(ets).strftime("%y-%m-%d %H:%M") if ets else "          TBD"
                     dur_str = str(dt.timedelta(seconds=(ets if ets else cur_time) - sts)).replace(" day, ", "d ")
-                    # self.logger.info(f"{a_id}: {a_entry}")
                     self.logger.info(f"  {attack_id:>8} {str(attack_entry['srcNetwork']):<20} {attack_entry['destPort']:<5} "
-                                     f"{st:>14} {dur_str:>11} {et:>15} {attack_tracking_entry['matchCount']:>7} "
-                                     f"{attack_tracking_entry['matchPackets']:>8} "
-                                     f"{interface_entry['routerName']:>13} {str(interface_index):>7} " 
-                                     f"{interface_entry['asn']:>10} "
-                                     f"{len(attack_tracking_entry['destIps']):>6}")
+                                     f"{st:>14} {dur_str:>11} {et:>15} "
+                                     f"{attack_tracking_entry.get('matchCount','none'):>7} "
+                                     f"{attack_tracking_entry.get('matchPackets','none'):>8} "
+                                     f"{interface_entry.get('routerName', 'none'):>13} {str(interface_index):>7} " 
+                                     f"{interface_entry.get('asn', 0):>10} "
+                                     f"{len(attack_tracking_entry.get('destIps', 0)):>6}")
                 except Exception as ex:
                     self.logger.info(f"  {attack_id:>8} {str(attack_entry['srcNetwork']):<20} {attack_entry['destPort']:<5} "
                                      f"{ex}", exc_info=self.print_ex_backtraces)
