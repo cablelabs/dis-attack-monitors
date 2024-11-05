@@ -31,7 +31,7 @@ class HiveMonitor:
         self.add_test_attacks()
         self.logger = logging.getLogger(logger.name + ":HIVE Monitor")
         self.hive_client_cert_file = args.hive_client_cert_file
-        self.logger.info(f"Initialized with {pprint.pformat(self.__dict__)}")
+        self.logger.info(f"Initialized with \n{pprint.pformat(self.__dict__)}")
 
     async def startup(self, event_loop):
         self.event_loop = event_loop
@@ -45,13 +45,14 @@ class HiveMonitor:
         self.captureMonitors.remove(capture_monitor)
 
     def add_test_attacks(self):
+        retro_adjustment = 120
         if self.test_entries:
             for attack_entries_str in self.test_entries:
                 for attack_entry_str in attack_entries_str.split(';'):
                     ae = json.loads(attack_entry_str)
-                    curtime = int(time.time())
+                    startTime = int(time.time()) - retro_adjustment
                     attack = {'attackId': ae['attackId'],
-                              'startTime': curtime, 'endTime': curtime + ae['durationMinutes'] * 60,
+                              'startTime': startTime, 'endTime': startTime + ae['durationMinutes'] * 60,
                               'srcNetwork': ae['srcNetwork'], 'destPort': ae['destPort'], 'reporters': [],
                               'messageType': 'HIVE:ATTACK_START'}
                     self.active_attacks_dict[attack['attackId']] = attack
@@ -76,10 +77,10 @@ class HiveMonitor:
         try:
             if self.hive_proxy_url:
                 proxy = Proxy.from_url(self.hive_proxy_url)
-                self.logger.info(f"Connecting to {self.hive_url} via proxy {self.hive_proxy_url}...")
+                self.logger.info(f"CONNECTING to {self.hive_url} via proxy {self.hive_proxy_url}...")
                 ws_context = websockets_proxy.proxy_connect(self.hive_url, ssl=ssl_context, proxy=proxy)
             else:
-                self.logger.info(f"Connecting to {self.hive_url}...")
+                self.logger.info(f"CONNECTED to {self.hive_url}")
                 ws_context = websockets.connect(self.hive_url, ssl=ssl_context)
         except Exception as Ex:
             self.logger.info(f"Caught an exception creating connection to {self.hive_url}"

@@ -2,8 +2,6 @@
 # This software is made available according to the terms in the LICENSE.txt accompanying this code
 #
 
-# TODO: Stop tracking HIVE attacks locally - use self.hive_monitor
-
 import os
 import sys
 from captureMonitorBase import TrafficMonitorBase
@@ -29,13 +27,13 @@ class ArborWsApiTrafficMonitor(TrafficMonitorBase):
         self.arborws_api_insecure = args.arborws_api_insecure
         self.router_scan_initial_delay_s = 10
         self.router_scan_period_s = args.arborws_router_scan_period_s
+        self.router_savefile = args.arborws_router_savefile
         self.forensics_scan_initial_delay_s = 10
         self.forensics_scan_period_s = args.arborws_forensics_scan_period_s
         self.forensics_scan_overlap_s = args.arborws_forensics_scan_overlap_s
         self.data_found_callback = None
         self.forensics_scan_task = None
         self.router_info_collection_task = None
-        self.router_info_lock = asyncio.Lock()
         self.event_loop = None
         self.attack_table = {}
         self.attack_tracking_table = {}
@@ -43,13 +41,14 @@ class ArborWsApiTrafficMonitor(TrafficMonitorBase):
         self.max_ips_per_fingerprint = 100
         self.print_ex_backtraces = True
         self.logger = logging.getLogger(logger.name + ":Arbor Capture")
-        self.logger.info(f"Initialized with {pprint.pformat(self.__dict__)}")
+        self.logger.info(f"Initialized with \n{pprint.pformat(self.__dict__)}")
 
     async def startup(self, event_loop):
         self.event_loop = event_loop
         self.logger.debug(f"ArborWsApiTrafficMonitor: Performing startup")
         await self._check_arborws_access()
-        self.router_info_collection_task = asyncio.create_task(self._periodic_router_metadata_collector())
+        loaded = await self._load_router_metadata()
+        self.router_info_collection_task = asyncio.create_task(self._periodic_router_metadata_collector(not loaded))
         self.forensics_scan_task = event_loop.create_task(self._periodic_arbor_forensics_scan())
 
     def register_traffic_found_callback(self, callback: Callable[[dict], Awaitable[None]]):
@@ -109,108 +108,167 @@ class ArborWsApiTrafficMonitor(TrafficMonitorBase):
 
     async def _dump_attack_tracking_entries(self, attack_tracking_table, desc_string=""):
         self.logger.info(f"DUMPING {len(attack_tracking_table)} {desc_string}ATTACK TRACKING ENTRIES")
-        async with self.router_info_lock:
-            self.logger.info(f" ATTACK ID SRC NETWORK          DPORT     START TIME     DURATION       END TIME MATCHES  PACKETS          ROUTER     INT        ASN #DESTS")
-            cur_time = int(time.time())
-            for (attack_id, router_gid, interface_index), attack_tracking_entry in attack_tracking_table.items():
-                try:
-                    attack_entry = self.attack_table[attack_id]
-                    router_entry = self.router_interface_map.get(router_gid)
-                    if router_entry:
-                        interface_map = router_entry['interfaces']
-                    else:
-                        interface_map = {interface_index: {"routerName": f"NR! {router_gid}", "asn": 0, "name": "unknown"}}
-                    interface_entry = interface_map.get(interface_index,
-                                                        {"routerName": f"NI! {router_gid}", "asn": 0, "name": "unknown"})
-                    # Attack entry fields: attackId, startTime, srcNetwork, destPort, reporters, count
-                    # Attack tracking fields: (attack_id, router_gid, interface_id) srcNetwork, matchCount,
-                    #                         matchPackets, destIps, lastScanEndTime, maxFlowTime
-                    sts = attack_entry['startTime']
-                    st = dt.datetime.utcfromtimestamp(attack_entry['startTime']).strftime("%y-%m-%d %H:%M")
-                    ets = attack_entry.get('endTime')
-                    et = dt.datetime.utcfromtimestamp(ets).strftime("%y-%m-%d %H:%M") if ets else "          TBD"
-                    dur_str = str(dt.timedelta(seconds=(ets if ets else cur_time) - sts)).replace(" day, ", "d ")
-                    self.logger.info(f"  {attack_id:>8} {str(attack_entry['srcNetwork']):<20} {attack_entry['destPort']:<5} "
-                                     f"{st:>14} {dur_str:>11} {et:>15} "
-                                     f"{attack_tracking_entry.get('matchCount','none'):>7} "
-                                     f"{attack_tracking_entry.get('matchPackets','none'):>8} "
-                                     f"{interface_entry.get('routerName', 'none'):>13} {str(interface_index):>7} " 
-                                     f"{interface_entry.get('asn', 0):>10} "
-                                     f"{len(attack_tracking_entry.get('destIps', 0)):>6}")
-                except Exception as ex:
-                    self.logger.info(f"  {attack_id:>8} {str(attack_entry['srcNetwork']):<20} {attack_entry['destPort']:<5} "
-                                     f"{ex}", exc_info=self.print_ex_backtraces)
-
-    async def _create_observation_report(self, attack_tracking_table):
-        observed_forgery_list = []
-        async with self.router_info_lock:
-            for (attack_id, router_gid, interface_index), attack_tracking_entry in attack_tracking_table.items():
+        self.logger.info(f" ATTACK ID SRC NETWORK          DPORT     START TIME     DURATION       END TIME  MATCH  PACKETS                 ROUTER    INT    ASN DESTS")
+        cur_time = int(time.time())
+        for (attack_id, router_gid, interface_index), attack_tracking_entry in attack_tracking_table.items():
+            try:
                 attack_entry = self.attack_table[attack_id]
                 router_entry = self.router_interface_map.get(router_gid)
                 if router_entry:
-                    interface_entry = router_entry['interfaces'].get(interface_index, {})
-                else:
-                    interface_entry = {}
+                    interface_map = router_entry.get('interfaces')
+                if not router_entry or not interface_map:
+                    interface_map = {interface_index: {"routerName": f"NR {router_gid}!", "asn": 0, "name": "unknown"}}
+                interface_entry = interface_map.get(interface_index, {"routerName": f"NI {router_gid}!",
+                                                                      "asn": 0, "name": "unknown"})
                 # Attack entry fields: attackId, startTime, srcNetwork, destPort, reporters, count
                 # Attack tracking fields: (attack_id, router_gid, interface_id) srcNetwork, matchCount,
                 #                         matchPackets, destIps, lastScanEndTime, maxFlowTime
-                # Interface fields: asn, description, id, ip, name, routerName, speed, type
-                observed_forgery_info = {"routerId": router_gid,
-                                         "interfaceId": interface_index,
-                                         "matchCount": attack_tracking_entry['matchCount'],
-                                         "matchedPackets": attack_tracking_entry['matchPackets'],
-                                         "destIps": attack_tracking_entry['destIps'],
-                                         "attackInfo": attack_entry,
-                                         "interfaceInfo": interface_entry}
-                observed_forgery_list.append(observed_forgery_info)
+                sts = attack_entry['startTime']
+                st = dt.datetime.utcfromtimestamp(attack_entry['startTime']).strftime("%y-%m-%d %H:%M")
+                ets = attack_entry.get('endTime')
+                et = dt.datetime.utcfromtimestamp(ets).strftime("%y-%m-%d %H:%M") if ets else "          TBD"
+                dur_str = str(dt.timedelta(seconds=(ets if ets else cur_time) - sts)).replace(" day, ", "d ")
+                asn_str = str(interface_entry.get('asn'))
+                if not asn_str:
+                    asn_str = "no asn"
+                self.logger.info(f"  {attack_id:>8} {str(attack_entry['srcNetwork']):<20} {attack_entry['destPort']:<5} "
+                                 f"{st:>14} {dur_str:>12} {et:>15} "
+                                 f"{attack_tracking_entry.get('matchCount','none'):>5} "
+                                 f"{attack_tracking_entry.get('matchPackets','none'):>8} "
+                                 f"{interface_entry.get('routerName', 'none'):>22} {str(interface_index):>6} " 
+                                 f"{asn_str:>6} "
+                                 f"{len(attack_tracking_entry.get('destIps', 0)):>5}")
+            except Exception as ex:
+                self.logger.info(f"  {attack_id:>8} {str(attack_entry['srcNetwork']):<20} {attack_entry['destPort']:<5} "
+                                 f"{ex}", exc_info=self.print_ex_backtraces)
+
+    async def _create_observation_report(self, attack_tracking_table):
+        observed_forgery_list = []
+        for (attack_id, router_gid, interface_index), attack_tracking_entry in attack_tracking_table.items():
+            attack_entry = self.attack_table[attack_id]
+            router_entry = self.router_interface_map.get(router_gid)
+            if router_entry:
+                interface_entry = router_entry['interfaces'].get(interface_index, {})
+            else:
+                interface_entry = {}
+            # Attack entry fields: attackId, startTime, srcNetwork, destPort, reporters, count
+            # Attack tracking fields: (attack_id, router_gid, interface_id) srcNetwork, matchCount,
+            #                         matchPackets, destIps, lastScanEndTime, maxFlowTime
+            # Interface fields: asn, description, id, ip, name, routerName, speed, type
+            observed_forgery_info = {"routerId": router_gid,
+                                     "interfaceId": interface_index,
+                                     "matchCount": attack_tracking_entry['matchCount'],
+                                     "matchedPackets": attack_tracking_entry['matchPackets'],
+                                     "destIps": attack_tracking_entry['destIps'],
+                                     "attackInfo": attack_entry,
+                                     "interfaceInfo": interface_entry}
+            observed_forgery_list.append(observed_forgery_info)
         return observed_forgery_list
 
-    async def _periodic_router_metadata_collector(self):
+    def _router_map_summary_str(self, prefix=""):
+        if self.router_interface_map is None:
+            return f"{prefix}NO ROUTER INTERFACE MAP"
+        if len(self.router_interface_map) == 0:
+            return f"{prefix}0 ROUTER INTERFACE MAP ENTRIES"
+        router_summary = f"{prefix}ROUTER INTERFACE MAP FOR {len(self.router_interface_map.keys())} ROUTERS:\n"
+        for (router_id, router_entry) in self.router_interface_map.items():
+            router_name = router_entry['info']['name']
+            interfaces = router_entry['interfaces']
+            router_summary += f"{prefix}  ROUTER {router_name} (gid {router_id}) " \
+                              f"has {len(list(interfaces.keys()))} interfaces:\n"
+            for interface_id, interface in interfaces.items():
+                router_summary += f"{prefix}    INTERFACE {interface['name']}: index {interface_id}, " \
+                                  f"type {interface['type']}, asn {interface.get('asn','none')}, desc \"{interface['description']}\"\n"
+        return router_summary
+
+    async def _load_router_metadata(self):
+        def dictsKeysToInts(x):
+            if isinstance(x, dict):
+                return {int(k) if k.isdigit() else k: v for k, v in x.items()}
+            return x
+
+        try:
+            self.logger.info(f"LOADING router metadata from savefile {self.router_savefile.name}...")
+            start_time = time.time()
+            with self.router_savefile.open("r") as router_info_file:
+                self.router_interface_map = json.load(router_info_file, object_hook=dictsKeysToInts)
+                self.logger.info(f"LOADED router metadata savefile {self.router_savefile.name} in "
+                                 f"{time.time()-start_time:0.1f} seconds")
+                self.logger.info(self._router_map_summary_str())
+            return True
+        except Exception as ex:
+            self.logger.warning(f"Could not open router metadata file {self.router_savefile.name} for reading: {ex}",
+                                exc_info=self.print_ex_backtraces)
+            return False
+
+    async def _save_router_metadata(self):
+        try:
+            self.logger.info(f"SAVING router metadata to savefile {self.router_savefile.name}...")
+            start_time = time.time()
+            with self.router_savefile.open("w") as router_info_file:
+                json.dump(self.router_interface_map, router_info_file, indent=4)
+                self.logger.info(f"SAVED router metadata to file {self.router_savefile.name} in "
+                                 f"{time.time()-start_time:0.1f}s")
+                self.logger.info(self._router_map_summary_str())
+            return True
+        except Exception as ex:
+            self.logger.warning(f"Could not write router metadata file {self.router_savefile.name} for reading: {ex}",
+                                exc_info=self.print_ex_backtraces)
+            return False
+
+    async def _periodic_router_metadata_collector(self, perform_initial_acquisition):
         # Call the Arbor WS API periodically to collect router and interface metadata
         self.logger.info(f"_periodic_router_metadata_collector: Performing router/interface scans every "
                          f"{self.router_scan_period_s} seconds")
-        await asyncio.sleep(self.router_scan_initial_delay_s)
+        initial_delay_s = self.router_scan_initial_delay_s if perform_initial_acquisition else self.router_scan_period_s
+        self.logger.info(f"_periodic_router_metadata_collector: Waiting {initial_delay_s}s to perform initial "
+                         f"router metadata acquisition...")
+        await asyncio.sleep(initial_delay_s)
         router_map_update = {}
         while True:
-            async with self.router_info_lock:
-                try:
-                    async with aiohttp.ClientSession() as http_session:
-                        self.logger.info("Refreshing router metadata...")
-                        start_time = time.time()
-                        router_query = ArborWsApiRouterQuery(self.arborws_url_prefix, self.arborws_api_key,
-                                                             validate_tls=self.arborws_api_insecure)
-                        await router_query.run_query(http_session)
-                        query_result = router_query.get_router_metadata()
-                        self.logger.debug("RETRIEVED router list:\n" + pprint.pformat(query_result))
+            try:
+                async with aiohttp.ClientSession() as http_session:
+                    self.logger.info("Refreshing router metadata...")
+                    start_time = time.time()
+                    router_query = ArborWsApiRouterQuery(self.arborws_url_prefix, self.arborws_api_key,
+                                                         validate_tls=self.arborws_api_insecure)
+                    await router_query.run_query(http_session)
+                    query_result = router_query.get_router_metadata()
+                    self.logger.debug("RETRIEVED router list:\n" + pprint.pformat(query_result))
 
-                        # Router dict will be keyed on the router gid, with "info" containing the RouterQuery
-                        #  metadata and "interfaces" containing a dict of interfaces, keyed on the SNMP interface index
-                        for router_info in query_result['data']:
-                            router_map_update[int(router_info.get('gid'))] = {'info': router_info, 'interfaces': []}
-                        # Since router interface queries can be very large (for operational routers), we'll just
-                        #  query one router at a time
-                        for router_gid in router_map_update.keys():
-                            tb = time.time()
-                            interface_query = ArborWsApiInterfaceQuery(self.arborws_url_prefix, self.arborws_api_key,
-                                                                       f"{self.forensics_scan_period_s} seconds ago",
-                                                                       "now",
-                                                                       validate_tls=self.arborws_api_insecure)
-                            result = await interface_query.run_query(http_session, routers=[router_gid])
-                            ints_for_router = interface_query.get_interface_metadata(asn_resolver=self.asn_resolver)
-                            self.logger.debug(f"_periodic_router_metadata_collector:  RETRIEVED list of interfaces for "
-                                              f"router {router_gid} in {time.time()-tb:.1f}s\n"
-                                              f"{pprint.pformat(ints_for_router)}")
-                            ints_for_gid = ints_for_router[int(router_gid)]
-                            router_map_update[router_gid]['interfaces'] = ints_for_gid
+                    # Router dict will be keyed on the router gid, with "info" containing the RouterQuery
+                    #  metadata and "interfaces" containing a dict of interfaces, keyed on the SNMP interface index
+                    for router_info in query_result['data']:
+                        router_map_update[int(router_info.get('gid'))] = {'info': router_info, 'interfaces': []}
+                    router_gids = list(router_map_update.keys())
+                    self.logger.info(f"RETRIEVED metadata for {len(router_gids)} routers: {router_gids}")
+                    # Since router interface queries can be very large (for operational routers), we'll just
+                    #  query one router at a time
+                    for router_gid in router_map_update.keys():
+                        tb = time.time()
+                        interface_query = ArborWsApiInterfaceQuery(self.arborws_url_prefix, self.arborws_api_key,
+                                                                   f"{self.forensics_scan_period_s} seconds ago",
+                                                                   "now",
+                                                                   validate_tls=self.arborws_api_insecure)
+                        result = await interface_query.run_query(http_session, routers=[router_gid])
+                        ints_for_router = interface_query.get_interface_metadata(asn_resolver=self.asn_resolver)
+                        self.logger.info(f"_periodic_router_metadata_collector: RETRIEVED list of "
+                                         f"{len(ints_for_router.get('router_gid',[]))} interfaces for "
+                                         f"router {router_gid} in {time.time()-tb:.1f}s")
+                        self.logger.debug(f"_periodic_router_metadata_collector: Interfaces for router "
+                                          f"{router_gid}:\n{pprint.pformat(ints_for_router)}")
+                        ints_for_gid = ints_for_router.get(int(router_gid), {})
+                        router_map_update[router_gid]['interfaces'] = ints_for_gid
 
-                        self.router_interface_map = router_map_update
-                        self.logger.info(f"_periodic_router_metadata_collector:  REFRESHED router metadata refresh in "
-                                         f"{time.time()-start_time:.1f}s")
-                        self.logger.debug(f"_periodic_router_metadata_collector:  REFRESHED router interface map: \n"
-                                          + pprint.pformat(self.router_interface_map))
-                except Exception as ex:
-                    self.logger.warning(f"Caught exception trying to refresh router metadata: {ex}",
-                                        exc_info=self.print_ex_backtraces)
+                    self.router_interface_map = router_map_update
+                    self.logger.info(f"_periodic_router_metadata_collector: REFRESHED router metadata in "
+                                     f"{time.time()-start_time:.1f}s")
+                    self.logger.debug(f"_periodic_router_metadata_collector: REFRESHED router interface map: \n"
+                                      + pprint.pformat(self.router_interface_map))
+                    await self._save_router_metadata()
+            except Exception as ex:
+                self.logger.warning(f"Caught exception trying to refresh router metadata: {ex}",
+                                    exc_info=self.print_ex_backtraces)
             self.logger.debug(f"_periodic_router_metadata_collector: SLEEPING for {self.router_scan_period_s}s")
             await asyncio.sleep(self.router_scan_period_s)
 
@@ -218,7 +276,7 @@ class ArborWsApiTrafficMonitor(TrafficMonitorBase):
         # Call the Arbor WS API periodically and check the results against the list of ongoing attacks
         # Call the data available callback if/when data is found
         self.logger.info(f"ArborWsApiTrafficMonitor: Performing forensics scans every {self.forensics_scan_period_s} "
-                         f" seconds ({self.forensics_scan_initial_delay_s} startup delay)")
+                         f"seconds ({self.forensics_scan_initial_delay_s}s startup delay)")
         start_time = time.time()
         await asyncio.sleep(self.forensics_scan_initial_delay_s)
         while True:
@@ -479,6 +537,7 @@ class ArborWsApiRouterQuery:
         self.logger = logging.getLogger(str(__class__))
         self.validate_tls = validate_tls
         self.router_metadata = {}
+        self.query_limit = 1000000
         # curl -ks "https://dis-vl-sightline-1/arborws/admin/routers/" \
         #      -d "api_key=OLT8mCbnZRbVwI9L" -d "action=list" -d "sort=name:ascending"
 
@@ -486,7 +545,8 @@ class ArborWsApiRouterQuery:
         # set up the url, endpoint, and request parameters to execute a query
         url = f"{self.url_prefix }/arborws/admin/routers/"
         parameters = {'api_key': self.arbor_wsapikey,
-                      'action': "list"}
+                      'action': "list",
+                      'limit': self.query_limit}
         self.logger.debug(f"Performing router query to {url}...")
         time_before_request = time.time()
         async with client_session.get(url, params=parameters, ssl=self.validate_tls, raise_for_status=True) as response:
@@ -558,7 +618,7 @@ class ArborWsApiInterfaceQuery:
             response_body = await response.text()
             time_after_xfer = time.time()
             self.logger.info(f"Received {len(response_body)}-byte response from {url} "
-                             f"after {time_after_xfer-time_before_request:0.2} seconds")
+                             f"for routers {routers} after {time_after_xfer-time_before_request:0.2} seconds    ")
 
             root = ET.fromstring(response_body)
             query_reply = root.find("query-reply")

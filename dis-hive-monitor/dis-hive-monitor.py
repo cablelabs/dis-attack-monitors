@@ -7,6 +7,7 @@
 import argparse
 import asyncio
 import copy
+import pathlib
 from datetime import datetime
 from pathlib import Path
 
@@ -241,15 +242,20 @@ arborws_group.add_argument('--arbor-ws-api-insecure', "-aai", required=False, de
                            help="Disable cert checks when invoking Arbor SP API REST calls against https URI prefixes "
                                 "(or DIS_HIVEMON_ARBORWS_API_INSECURE)")
 # TODO: Add support for multi-unit value parsing (e.g. "30s", "30m", "2h", "12h", "2d")
-arborws_group.add_argument('--arbor-ws-api-router-scan-period', "-awsrasp", required=False,
+arborws_group.add_argument('--arbor-ws-api-router-scan-period', "-awsrsp", required=False,
                            dest="arborws_router_scan_period_s", action='store', type=int,
                            default=os.environ.get('DIS_HIVEMON_ARBORWS_ROUTER_SCAN_PERIOD_S', 600),
-                           help="The period to scan the Arbor router and interfce APIs for metadata (in seconds)")
-arborws_group.add_argument('--arbor-ws-api-forensics-scan-period', "-awsfasp", required=False,
+                           help="The period to scan the Arbor router and interface APIs for the refreshing "
+                                "of router/interface metadata (in seconds)")
+arborws_group.add_argument('--arbor-ws-api-router-savefile', "-awsrsf", required=False,
+                           dest="arborws_router_savefile", action='store', type=pathlib.Path,
+                           default=os.environ.get('DIS_HIVEMON_ARBORWS_ROUTER_SAVEFILE', "arbor-router-info.json"),
+                           help="A filename to load router/interface metadata from and save into when refreshing")
+arborws_group.add_argument('--arbor-ws-api-forensics-scan-period', "-awsfsp", required=False,
                            dest="arborws_forensics_scan_period_s", action='store', type=int,
                            default=os.environ.get('DIS_HIVEMON_ARBORWS_FORENSICS_SCAN_PERIOD_S'),
                            help="The period to check the Arbor forensics API for HIVE-signalled attacks (in seconds)")
-arborws_group.add_argument('--arbor-ws-api-forensics-scan-overlap', "-awsfaso", required=False,
+arborws_group.add_argument('--arbor-ws-api-forensics-scan-overlap', "-awsfso", required=False,
                            dest="arborws_forensics_scan_overlap_s", action='store', type=int,
                            default=os.environ.get('DIS_HIVEMON_ARBORWS_FORENSICS_SCAN_OVERLAP_S', 240),
                            help="The amount of time, in seconds, to check before the scan period to pickup latent "
