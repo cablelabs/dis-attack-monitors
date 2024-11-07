@@ -32,6 +32,7 @@ class HiveMonitor:
         self.logger = logging.getLogger(logger.name + ":HIVE Monitor")
         self.hive_client_cert_file = args.hive_client_cert_file
         self.logger.info(f"Initialized with \n{pprint.pformat(self.__dict__)}")
+        self.print_ex_backtraces = True
 
     async def startup(self, event_loop):
         self.event_loop = event_loop
@@ -111,7 +112,6 @@ class HiveMonitor:
             message_id = message['messageId']
             self.logger.debug(f"process_hive_message {message_id}: {json.dumps(message_json, indent=3)}")
             message_type = message['messageType']
-            self.logger.debug(f"process_hive_message: {json.dumps(message_json, indent=3)}")
             if message_type == 'HIVE:ATTACK_START':
                 attack_id = message['attackId']
                 self.logger.debug(f"Adding attack ID {attack_id} to tracked attack list")
@@ -144,7 +144,7 @@ class HiveMonitor:
             self.logger.info(f"process_hive_message: Ignoring unknown message: {message_json}")
         except Exception as Ex:
             self.logger.warning(f"process_hive_message: Caught an exception processing message {hive_message}: {Ex}",
-                                exc_info=True)
+                                exc_info=self.print_ex_backtraces)
         finally:
             if self.dump_list_updates:
                 self.dump_attack_entries()

@@ -57,6 +57,10 @@ arg_parser.add_argument('--drop-routers', "-dr", required=False, action='store',
                         default=os.environ.get('DIS_HIVEMON_DROP_ROUTERS'), dest="drop_routers",
                         help="Specify a list of one or more router names and/or IP addresses, separated with commas, "
                              f"to skip for forged traffic scanning and reporting (or DIS_HIVEMON_DROP_ROUTERS).")
+arg_parser.add_argument('--only-routers', "-or", required=False, action='store', type=str,
+                        default=os.environ.get('DIS_HIVEMON_ONLY_ROUTERS'), dest="only_routers",
+                        help="Specify a list of one or more router names and/or IP addresses, separated with commas, "
+                             f"to skip for forged traffic scanning and reporting (or DIS_HIVEMON_DROP_ROUTERS).")
 arg_parser.add_argument('--drop-interface-types', "-dit", required=False, action='store', type=str,
                         default=os.environ.get('DIS_HIVEMON_DROP_INT_TYPES'), dest="drop_interface_types",
                         help="Specify a list of one or more interface type strings, separated with commas, "
