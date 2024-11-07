@@ -19,7 +19,6 @@ class AsnResolver:
         self.logger.info(f"Initialized with \n{pprint.pformat(self.__dict__)}")
 
     def router_interface_to_asn(self, router_name, int_name, int_description):
-        self.logger.debug(f"router_interface_to_asn({router_name}, {int_name}, {int_description})")
         if int_name:
             if self.int_name_regex:
                 match = self.int_name_regex.match(int_name)

@@ -7,6 +7,7 @@ import sys
 from captureMonitorBase import TrafficMonitorBase
 import asyncio
 from ipaddress import IPv4Network
+import re
 from typing import Callable, Awaitable
 import aiohttp
 import time
@@ -33,9 +34,12 @@ class ArborWsApiTrafficMonitor(TrafficMonitorBase):
         self.only_routers = set(args.only_routers.split(',')) if args.only_routers else None
         self.drop_interface_types = set(args.drop_interface_types.split(',')) if args.drop_interface_types else None
         self.only_interface_types = set(args.only_interface_types.split(',')) if args.only_interface_types else None
-        self.drop_interface_asns = set(args.drop_interface_asns.split(',')) if args.drop_interface_asns else None
-        self.drop_interface_regex = args.drop_interface_regex
-        self.only_interface_regex = args.only_interface_regex
+        self.drop_interface_asns = {int(x) for x in args.drop_interface_asns.split(',')} if args.drop_interface_asns else None
+        self.drop_interface_regex = re.compile(args.drop_interface_regex) if args.drop_interface_regex else None
+        self.only_interface_regex = re.compile(args.only_interface_regex) if args.only_interface_regex else None
+        self.int_filtering_needed = bool(self.drop_interface_types or self.only_interface_types
+                                         or self.drop_interface_asns or self.drop_interface_regex
+                                         or self.only_interface_regex)
         self.forensics_scan_initial_delay_s = 10
         self.forensics_scan_period_s = args.arborws_forensics_scan_period_s
         self.forensics_scan_overlap_s = args.arborws_forensics_scan_overlap_s
@@ -392,6 +396,11 @@ class ArborWsApiTrafficMonitor(TrafficMonitorBase):
                             flow_entry_time = int(flow_entry['time'])
                             flow_entry_src = ipaddress.ip_network(flow_entry['src_ip'])
                             flow_entry_dest_port = int(flow_entry['dst_port'])
+                            flow_entry_router_gid = int(flow_entry['router_gid'])
+                            flow_entry_int_index = int(flow_entry['in'])
+
+                            if not self._interface_allowed_by_rule(flow_entry_router_gid, flow_entry_int_index):
+                                continue
 
                             # Find the attack entry for this flow entry
                             for attack_id, attack_entry in self.attack_table.items():
@@ -409,9 +418,7 @@ class ArborWsApiTrafficMonitor(TrafficMonitorBase):
                                     self.logger.debug(f"  FLOW ENTRY: {flow_entry}")
 
                                     # We'll track matches accd to attackID+routerID+interfaceID
-                                    router_gid = int(flow_entry['router_gid'])
-                                    interface_index = int(flow_entry['in'])
-                                    attack_tracking_index = (attack_id, router_gid, interface_index)
+                                    attack_tracking_index = (attack_id, flow_entry_router_gid, flow_entry_int_index)
                                     attack_tracking_entry = self.attack_tracking_table.get(attack_tracking_index)
                                     if not attack_tracking_entry:
                                         attack_tracking_entry = {"matchCount": 0,
@@ -453,6 +460,36 @@ class ArborWsApiTrafficMonitor(TrafficMonitorBase):
             self.logger.warning(f"Caught exception while processing flow from forensics API: {ex}",
                                 exc_info=self.print_ex_backtraces)
 
+    def _interface_allowed_by_rule(self, router_gid, int_index):
+        if not self.int_filtering_needed:
+            return True
+        try:
+            int_entry = self.router_gid_interface_map[router_gid]['interfaces'].get(int_index)
+            # self.logger.debug(f"_interface_allowed_by_rule(router gid {router_gid}, interface {int_index}): {int_entry}")
+            if self.only_interface_types:
+                result = int_entry['type'] in self.only_interface_types
+                # self.logger.debug(f"  Interface {'ALLOWED' if result else 'DENIED'} via only_interface_types "
+                #                   f"{self.only_interface_types}")
+                return result
+            if self.only_interface_regex:
+                result = self.only_interface_regex.match(int_entry['description'])
+                # self.logger.debug(f"  Interface {'ALLOWED' if result else 'DENIED'} via only_interface_regex "
+                #                   f"{self.only_interface_regex}")
+                return result
+            if self.drop_interface_types and int_entry['type'] in self.drop_interface_types:
+                # self.logger.debug(f"  Interface DROPPED via drop_interface_types {self.drop_interface_types}")
+                return False
+            if self.drop_interface_asns and int_entry['asn'] in self.drop_interface_asns:
+                # self.logger.debug(f"  Interface DROPPED via drop_interface_asns {self.drop_interface_asns}")
+                return False
+            if self.drop_interface_regex and self.drop_interface_regex.match(int_entry['description']):
+                # self.logger.debug(f"  Interface DROPPED via drop_interface_regex {self.drop_interface_regex}")
+                return False
+            return True
+        except Exception as ex:
+            self.logger.warning(f"Caught exception checking interface against rules: {ex}",
+                                exc_info=self.print_ex_backtraces)
+
     async def _process_completed_attacks(self):
         horizon = time.time() - self.forensics_scan_overlap_s  # Need to account for latency of packets showing up in forensics
         completed_attacks = {k: v for k, v in self.attack_table.items() if v.get('endTime', sys.maxsize) < horizon}
@@ -479,6 +516,7 @@ class ArborWsApiTrafficMonitor(TrafficMonitorBase):
     async def _check_arborws_access(self):
         # TODO
         pass
+
 
 class ArborWsApiTrafficQuery:
     def __init__(self, url_prefix, arbor_wsapikey, start_time_expression, end_time_expression,
