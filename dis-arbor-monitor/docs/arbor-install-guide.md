@@ -80,25 +80,25 @@ The DIS Arbor Monitor/Client requires the following:
         (http or https)
 
     -   Access to the Arbor Netscout REST API (e.g.
-        http://arbor-hostname-or-ip/)
+        http://<arbor-hostname-or-ip>/)
 
     -   A network connection allowing outbound HTTPS connections (specifically
-        to <https://<dis_site/>)
+        to https://<dis_server_host> on port 443)
 
     -   Optionally, a https server certificate that the Sightline 9.x system can
         use to validate the server (when configuring Sightline webhooks using
         https)
 
     -   Optionally, a root certificate that allows for validation of Sightline
-        API REST calls (when configuring the DIS Client with an https URI)
+        API REST calls (when accessing the Arbor REST API using https)
 
 For installing the DIS Arbor Monitor/Client, perform the following:
 
-1.  **Retrieve the latest Docker management script for the DDOS Info Sharing client:**
+1.  **Retrieve the latest management script for the DDOS Info Sharing monitor:**
     
     ```
-    wget https://raw.githubusercontent.com/cablelabs/dis-arbor-monitor/master/arbormon-container.sh
-    wget https://raw.githubusercontent.com/cablelabs/dis-arbor-monitor/master/arbormon-container.conf
+    wget https://<dis_site>/assets/scripts/arbormon-container.sh
+    wget https://<dis_site>/assets/scripts/arbormon-container.conf
     ```
 
 2.  **Install the script:**
@@ -147,6 +147,9 @@ For installing the DIS Arbor Monitor/Client, perform the following:
 
     -   `DEF_ARBOR_REST_API_TOKEN` should be set to the key setup in the previous
         section (see section "Create a sightline API key")
+
+    -   `DEF_REPORT_CONSUMER_API_URI` is the base URI for uploading DIS source address reports.
+        (e.g. "https://<dis_site>/")
 
     -   `DEF_REPORT_CONSUMER_API_KEY` is set to the API key created in the previous
         section (see section "Create an API key for the Monitor/Client")
@@ -279,7 +282,7 @@ For installing the DIS Arbor Monitor/Client, perform the following:
 
     ```
     DOCKER_CMD="sudo docker"
-    DEF_IMAGE_LOCATION="community.cablelabs.com:4567/dis-docker/dis-arbor-monitor"
+    DEF_IMAGE_LOCATION="https://<dis_site>/assets/docker-images"
     DEF_IMAGE_TAG=latest
     DEF_CONTAINER_NAME=dis-arbor-monitor-service
     DEF_TLS_CERT_CHAIN_FILE=/etc/dis-arbor-monitor/combined.cer 
@@ -288,6 +291,7 @@ For installing the DIS Arbor Monitor/Client, perform the following:
     DEF_BIND_ADDRESS=0.0.0.0
     DEF_ARBOR_REST_API_PREFIX=https://arbor-001.acme.com 
     DEF_ARBOR_REST_API_TOKEN=Your-Arbor-API-Token
+    DEF_REPORT_CONSUMER_API_URI=https://<dis_site>/
     DEF_REPORT_CONSUMER_API_KEY=Your-DIS-API-Key
     DEF_REPORT_CONSUMER_HTTP_PROXY=https://proxy.acme.com:8080
     DIS_ARBORMON_WEBHOOK_TOKEN=abcd1234
