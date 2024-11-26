@@ -204,7 +204,9 @@ class ArborWsApiTrafficMonitor(TrafficMonitorBase):
                               f"has {len(list(interfaces.keys()))} interfaces:\n"
             for interface_id, interface in interfaces.items():
                 router_summary += f"{prefix}    INTERFACE {interface['name']}: index {interface_id}, " \
-                                  f"type {interface['type']}, asn {interface.get('asn','none')}, desc \"{interface['description']}\"\n"
+                                  f"type \"{interface['type']}\", asn {interface.get('asn','none')}, desc " \
+                                  f"\"{interface.get('description','')}\"" \
+                                  f"{' (filtered by rule)' if interface.get('filteredByRule') else ''}\n"
         return router_summary
 
     async def _load_router_metadata(self):
@@ -219,6 +221,8 @@ class ArborWsApiTrafficMonitor(TrafficMonitorBase):
             try:
                 with self.router_savefile.open("r") as router_info_file:
                     self.router_gid_interface_map = json.load(router_info_file, object_hook=dictsKeysToInts)
+                    for router in self.router_gid_interface_map.values():
+                        self._mark_filtered_by_rule_interfaces(router['interfaces'])
                     self.router_name_gid_map = {router["info"].get("name"): router_gid
                                                 for router_gid, router in self.router_gid_interface_map.items()}
                     self.logger.debug(f"Router name-to-gid table for {len(self.router_name_gid_map)} routers: "
@@ -304,6 +308,7 @@ class ArborWsApiTrafficMonitor(TrafficMonitorBase):
                         self.logger.debug(f"_periodic_router_metadata_collector: Interfaces for router "
                                           f"{router_gid}:\n{pprint.pformat(ints_for_router)}")
                         ints_for_gid = ints_for_router.get(int(router_gid), {})
+                        self._mark_filtered_by_rule_interfaces(ints_for_gid)
                         router_map_update[router_gid]['interfaces'] = ints_for_gid
 
                     self.router_gid_interface_map = router_map_update
@@ -319,6 +324,45 @@ class ArborWsApiTrafficMonitor(TrafficMonitorBase):
                                     exc_info=self.print_ex_backtraces)
             self.logger.debug(f"_periodic_router_metadata_collector: SLEEPING for {self.router_scan_period_s}s")
             await asyncio.sleep(self.router_scan_period_s)
+
+    def _mark_filtered_by_rule_interfaces(self, interface_map):
+        for int_entry in interface_map.values():
+            int_entry['filteredByRule'] = not self._interface_allowed_by_rule(int_entry)
+
+    def _interface_allowed_by_rule(self, int_entry):
+        if not self.int_filtering_needed:
+            return True
+        try:
+            if self.only_interface_types:
+                result = int_entry['type'] in self.only_interface_types
+                # self.logger.debug(f"  Interface {'ALLOWED' if result else 'DENIED'} via only_interface_types "
+                #                   f"{self.only_interface_types}")
+                return result
+            if self.only_interface_regex:
+                desc = int_entry.get('description')
+                if not desc:
+                    result = False
+                else:
+                    result = self.only_interface_regex.match(desc)
+                # self.logger.debug(f"  Interface {'ALLOWED' if result else 'DENIED'} via only_interface_regex "
+                #                   f"{self.only_interface_regex}")
+                return result
+            if self.drop_interface_types and int_entry['type'] in self.drop_interface_types:
+                # self.logger.debug(f"  Interface DROPPED via drop_interface_types {self.drop_interface_types}")
+                return False
+            if self.drop_interface_asns and int_entry['asn'] in self.drop_interface_asns:
+                # self.logger.debug(f"  Interface DROPPED via drop_interface_asns {self.drop_interface_asns}")
+                return False
+            if self.drop_interface_regex:
+                desc = int_entry.get('description')
+                if desc and self.drop_interface_regex.match(desc):
+                    # self.logger.debug(f"  Interface DROPPED via drop_interface_regex {self.drop_interface_regex}")
+                    return False
+            return True
+        except Exception as ex:
+            self.logger.warning(f"Caught exception checking interface against rules: {ex}\n{pprint.pformat(int_entry)}",
+                                exc_info=self.print_ex_backtraces)
+
 
     async def _periodic_arbor_forensics_scan(self):
         # Call the Arbor WS API periodically and check the results against the list of ongoing attacks
@@ -398,8 +442,10 @@ class ArborWsApiTrafficMonitor(TrafficMonitorBase):
                             flow_entry_dest_port = int(flow_entry['dst_port'])
                             flow_entry_router_gid = int(flow_entry['router_gid'])
                             flow_entry_int_index = int(flow_entry['in'])
-
-                            if not self._interface_allowed_by_rule(flow_entry_router_gid, flow_entry_int_index):
+                            int_entry = self.router_gid_interface_map[
+                                            flow_entry_router_gid]['interfaces'].get(flow_entry_int_index)
+                            if int_entry and int_entry['filteredByRule']:
+                                self.logger.debug(f"Flow entry with time {flow_entry_time} IGNORED via filteredByRule")
                                 continue
 
                             # Find the attack entry for this flow entry
@@ -458,36 +504,6 @@ class ArborWsApiTrafficMonitor(TrafficMonitorBase):
                     attack_tracking_entry['lastWindowFlowTime'] = attack_tracking_entry['maxFlowTime']
         except Exception as ex:
             self.logger.warning(f"Caught exception while processing flow from forensics API: {ex}",
-                                exc_info=self.print_ex_backtraces)
-
-    def _interface_allowed_by_rule(self, router_gid, int_index):
-        if not self.int_filtering_needed:
-            return True
-        try:
-            int_entry = self.router_gid_interface_map[router_gid]['interfaces'].get(int_index)
-            # self.logger.debug(f"_interface_allowed_by_rule(router gid {router_gid}, interface {int_index}): {int_entry}")
-            if self.only_interface_types:
-                result = int_entry['type'] in self.only_interface_types
-                # self.logger.debug(f"  Interface {'ALLOWED' if result else 'DENIED'} via only_interface_types "
-                #                   f"{self.only_interface_types}")
-                return result
-            if self.only_interface_regex:
-                result = self.only_interface_regex.match(int_entry['description'])
-                # self.logger.debug(f"  Interface {'ALLOWED' if result else 'DENIED'} via only_interface_regex "
-                #                   f"{self.only_interface_regex}")
-                return result
-            if self.drop_interface_types and int_entry['type'] in self.drop_interface_types:
-                # self.logger.debug(f"  Interface DROPPED via drop_interface_types {self.drop_interface_types}")
-                return False
-            if self.drop_interface_asns and int_entry['asn'] in self.drop_interface_asns:
-                # self.logger.debug(f"  Interface DROPPED via drop_interface_asns {self.drop_interface_asns}")
-                return False
-            if self.drop_interface_regex and self.drop_interface_regex.match(int_entry['description']):
-                # self.logger.debug(f"  Interface DROPPED via drop_interface_regex {self.drop_interface_regex}")
-                return False
-            return True
-        except Exception as ex:
-            self.logger.warning(f"Caught exception checking interface against rules: {ex}",
                                 exc_info=self.print_ex_backtraces)
 
     async def _process_completed_attacks(self):

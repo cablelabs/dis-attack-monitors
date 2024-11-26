@@ -1,5 +1,5 @@
 DOCKER_REGISTRY := artifactory.cablelabs.com
-DOCKER_IMAGE_TAG := test-sp-v10-endpoints
+DOCKER_IMAGE_TAG := sp-v10-endpoints
 DOCKER_IMAGE_PATH := dis-docker/dis-arbor-monitor:$(DOCKER_IMAGE_TAG)
 
 # This is to save/upload Docker images for participant hosts that can't download images using Docker

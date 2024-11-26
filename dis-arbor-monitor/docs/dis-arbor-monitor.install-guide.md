@@ -96,16 +96,15 @@ For installing the DIS Arbor Monitor/Client, perform the following:
 1.  **Retrieve the latest Docker management script for the DDoS Info Sharing client:**
     
     ```
-    wget https://dis-server-hostname/assets/scripts/arbormon-container.sh ./
-    wget https://dis-server-hostname/assets/scripts/arbormon-container.conf ./
+    rm -fv arbormon-container.{sh,conf}
+    wget https://dissarm.net/assets/scripts/arbormon-container.{sh,conf}
     ```
 
 2.  **Install the script:**
 
     ```
     sudo mkdir /etc/dis-arbor-monitor/
-    sudo install -v -o root -m 755 -D -t /etc/dis-arbor-monitor/arbormon-container.sh
-    sudo install -v -o root -m 600 -D -C -t /etc/dis-arbor-monitor/arbormon-container.conf
+    sudo install -v -o root -m 755 -D -t /etc/dis-arbor-monitor/ arbormon-container.*
     ```
 
 3.  **Configure the settings for your environment:**
