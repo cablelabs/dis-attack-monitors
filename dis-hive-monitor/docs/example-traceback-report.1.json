@@ -1,0 +1,37 @@
+{
+    "version": 1,
+    "tracebackReports": [
+        {
+            "attackId": "abcd1234",
+            "startTimestamp": 1684292202,
+            "endTimestamp": 1684299401,
+            "sourceAddress": "172.117.73.0/24",
+            "destPort": 53,
+            "sourceInterfaceAsn": 45457,
+            "numPackets": 3456,
+            "attackType": ["bad", "real bad", "terrible"],
+            "honeypotSource": ["amppot"]
+        },
+        {
+            "attackId": "abcd1235",
+            "startTimestamp": 1684328201,
+            "endTimestamp": 1684310201,
+            "sourceAddress": "45.158.21.0/24",
+            "destPort": 53,
+            "sourceInterfaceAsn": 45457,
+            "sourceInterfaceName": "pizza",
+            "numPackets": 3456
+        },
+        {
+            "attackId": "abcd1245",
+            "startTimestamp": 1684288601,
+            "endTimestamp": 1684295801,
+            "sourceAddress": "143.137.197.0/24",
+            "destPort": 123,
+            "sourceInterfaceAsn": 68973,
+            "sourceInterfaceNetwork": ["1.2.8.0/25"],
+            "numPackets": 567,
+            "honeypotSource": ["hopscotch", "amppot"]
+        }
+    ]
+}
