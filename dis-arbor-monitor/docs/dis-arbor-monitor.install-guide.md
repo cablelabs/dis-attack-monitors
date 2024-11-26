@@ -103,7 +103,6 @@ For installing the DIS Arbor Monitor/Client, perform the following:
 2.  **Install the script:**
 
     ```
-    sudo mkdir /etc/dis-arbor-monitor/
     sudo install -v -o root -m 755 -D -t /etc/dis-arbor-monitor/ arbormon-container.*
     ```
 
