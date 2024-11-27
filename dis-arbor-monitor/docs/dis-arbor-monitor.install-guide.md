@@ -1,6 +1,6 @@
 # Installation Guide for the DDoS Info Sharing (DIS) Netscout Arbor Sightline Monitor/Client
 
-### v 0.6
+### v 0.7
 
 ## 1. Introduction
 
