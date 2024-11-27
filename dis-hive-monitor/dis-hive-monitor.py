@@ -7,6 +7,7 @@
 import argparse
 import asyncio
 import copy
+import pathlib
 from datetime import datetime
 from pathlib import Path
 
@@ -23,6 +24,7 @@ from arborWsApiCaptureMonitor import ArborWsApiTrafficMonitor
 # from nfacctdCaptureMonitor import NfacctdTrafficMonitor
 from asnResolver import AsnResolver
 from hiveMonitor import HiveMonitor
+from disReportUploader import DisReportUploader
 
 # TODO: Add proxy support for accessing Arbor/Sightline
 
@@ -52,7 +54,34 @@ arg_parser.add_argument('--report-status-interval', "-rsi", required=False, acti
                              "(or DIS_HIVEMON_STATUS_REPORT_INTERVAL_S) (0: disabled)")
 arg_parser.add_argument('--dump-list-updates', "-du", required=False, action='store_true',
                         default=False, help="Print the complete attack list after every update message.")
-
+arg_parser.add_argument('--drop-routers', "-dr", required=False, action='store', type=str,
+                        default=os.environ.get('DIS_HIVEMON_DROP_ROUTERS'), dest="drop_routers",
+                        help="Specify a list of one or more router names and/or IP addresses, separated with commas, "
+                             f"to skip for forged traffic scanning and reporting (or DIS_HIVEMON_DROP_ROUTERS).")
+arg_parser.add_argument('--only-routers', "-or", required=False, action='store', type=str,
+                        default=os.environ.get('DIS_HIVEMON_ONLY_ROUTERS'), dest="only_routers",
+                        help="Specify a list of one or more router names and/or IP addresses, separated with commas, "
+                             f"to skip for forged traffic scanning and reporting (or DIS_HIVEMON_DROP_ROUTERS).")
+arg_parser.add_argument('--drop-interface-types', "-dit", required=False, action='store', type=str,
+                        default=os.environ.get('DIS_HIVEMON_DROP_INT_TYPES'), dest="drop_interface_types",
+                        help="Specify a list of one or more interface type strings, separated with commas, "
+                             f"to skip for forged traffic scanning and reporting (or DIS_HIVEMON_DROP_INT_TYPES).")
+arg_parser.add_argument('--only-interface-types', "-oit", required=False, action='store', type=str,
+                        default=os.environ.get('DIS_HIVEMON_ONLY_INT_TYPES'), dest="only_interface_types",
+                        help="Specify a list of one or more interface type strings, separated with commas, "
+                             f"to scan for forged traffic scanning and reporting (or DIS_HIVEMON_ONLY_INT_TYPES).")
+arg_parser.add_argument('--drop-interface-asns', "-diasn", required=False, action='store', type=str,
+                        default=os.environ.get('DIS_HIVEMON_DROP_INTERFACE_ASNS'), dest="drop_interface_asns",
+                        help="Specify a list of interfaces, by ASN, to skip for forged traffic scanning and  "
+                             f"reporting (or DIS_HIVEMON_DROP_ROUTER_NAMES).")
+arg_parser.add_argument('--drop-interface-regex', "-dir", required=False, action='store', type=str,
+                        default=os.environ.get('DIS_HIVEMON_DROP_INT_REGEX'), dest="drop_interface_regex",
+                        help="Skip scanning router interfaces with SNMP description strings which match the "
+                             f"designated regular expression. (or DIS_HIVEMON_DROP_INT_REGEX).")
+arg_parser.add_argument('--only-interface-regex', "-oir", required=False, action='store', type=str,
+                        default=os.environ.get('DIS_HIVEMON_ONLY_INT_REGEX'), dest="only_interface_regex",
+                        help="Only scan router interfaces with SNMP description strings which match the "
+                             f"designated regular expression. (or DIS_HIVEMON_ONLY_INT_REGEX).")
 #
 # HIVE connection options
 #
@@ -122,23 +151,34 @@ ex_asn_group.add_argument('--int-desc-asn-lookup-file', "-idlfile", required=Fal
                           default=os.environ.get('DIS_HIVEMON_INT_DESC_LOOKUP_FILE'), dest="int_desc_lookup_file",
                           help="Specify the file containing a list of ruleset used to determine ASN names "
                                "from interface descriptions (or set DIS_HIVEMON_INT_DESC_LOOKUP_FILE)")
-
 #
 # Observed forged traffic report storing/forwarding options
 #
 reporting_options = arg_parser.add_argument_group(
-                         title="Options for the storing and forwarding of Observed Forged Source Traffic Reports")
-arg_parser.add_argument ('--report-store-dir', "-repd", required=False, action='store', type=str,
+                         title="Options for the storing and forwarding of Forged Address Source Traffic Reports")
+reporting_options.add_argument('--dis-server-api-uri', "-dsuri", required=True, action='store', type=str,
+                               default=os.environ.get('DIS_HIVEMON_DIS_API_URI'), metavar="dis_api_uri",
+                               help="Specify the API prefix of the DIS server to submit DIS Forged Address "
+                                    "Source Traceback (FAST) Reports (or DIS_HIVEMON_REPORT_API_URI)")
+reporting_options.add_argument('--dis-server-http-proxy', "-dshp,", required=False, action='store',
+                               type=str, metavar="dis_api_http_proxy",
+                               default=os.environ.get('DIS_HIVEMON_DIS_API_HTTP_PROXY'),
+                               help="Specify the HTTP/HTTPS proxy URL for connecting to the DIS server "
+                                    "(or DIS_HIVEMON_DIS_API_HTTP_PROXY). e.g. 'http://10.0.1.11:1234'")
+reporting_options.add_argument('--dis-server-client-key', "-dsckey", required=True, action='store', type=str,
+                               default=os.environ.get('DIS_HIVEMON_DIS_API_CLIENT_KEY'), metavar="dis_api_client_key",
+                               help="Specify the API key to use for submitting DIS FAST reports "
+                                    "(or DIS_HIVEMON_DIS_API_CLIENT_KEY)")
+reporting_options.add_argument ('--report-store-dir', "-repd", required=False, action='store', type=str,
                          default=os.environ.get('DIS_HIVEMON_REPORT_STORE_DIR'), dest="report_store_dir",
                          help="Specify a directory to store generated Observed Forged Source Traffic Reports reports "
                               "(or DIS_HIVEMON_REPORT_STORE_DIR)")
-storage_format_choices=["only-source-attributes","all-attributes"]
-arg_parser.add_argument ('--report-store-format', "-repf", required=False, action='store', type=str,
+storage_format_choices=["only-source-attributes", "all-attributes"]
+reporting_options.add_argument ('--report-store-format', "-repf", required=False, action='store', type=str,
                          default=os.environ.get('DIS_HIVEMON_REPORT_STORE_FORMAT', "only-source-attributes"),
                          dest="report_store_format", choices=storage_format_choices,
                          help="Specify the report options for writing Observed Forged Source Traffic Reports reports "
                               f"(or DIS_HIVEMON_REPORT_STORE_FORMAT). One of {storage_format_choices}")
-
 #
 # NetFlow SQL Capture Options (nfacctd schema)
 #
@@ -199,10 +239,15 @@ arborws_group = arg_parser.add_argument_group(
                   title="Arbor Forensics API-based Capture Options",
                   description="Options for performing forged traffic scanning using the Arbor/Sightline Forensics "
                               "webservice.")
-arborws_group.add_argument('--arbor-ws-uri-prefix', "-awsuri", required=False, dest="arborws_url_prefix",
+arborws_group.add_argument('--arbor-ws-uri-prefix', "-awsuri", required=True, dest="arborws_url_prefix",
                            action='store', type=str, default=os.environ.get('DIS_HIVEMON_ARBORWS_URI_PREFIX'),
                            help="Specify the Arbor API prefix to use (or set DIS_HIVEMON_ARBORWS_URI_PREFIX)")
-arborws_group.add_argument('--arbor-ws-api-key', "-awskey", required=False, dest="arborws_api_key",
+arborws_group.add_argument('--arbor-ws-http-proxy', "-awshp,", required=False, action='store',
+                           type=str, metavar="arborws_http_proxy",
+                           default=os.environ.get('DIS_HIVEMON_ARBORWS_HTTP_PROXY'),
+                           help="Specify the HTTP/HTTPS proxy URL for connecting to the Arbor Web Services API "
+                                "(or DIS_HIVEMON_ARBORWS_HTTP_PROXY). e.g. 'http://10.0.1.11:1234'")
+arborws_group.add_argument('--arbor-ws-api-key', "-awskey", required=True, dest="arborws_api_key",
                            action='store', type=str, default=os.environ.get('DIS_HIVEMON_ARBORWS_API_KEY'),
                            help="Specify the Arbor API token to use for REST calls "
                                 "(or DIS_HIVEMON_ARBORWS_API_KEY)")
@@ -210,11 +255,23 @@ arborws_group.add_argument('--arbor-ws-api-insecure', "-aai", required=False, de
                            action='store_true', default=os.environ.get('DIS_HIVEMON_ARBORWS_API_INSECURE'),
                            help="Disable cert checks when invoking Arbor SP API REST calls against https URI prefixes "
                                 "(or DIS_HIVEMON_ARBORWS_API_INSECURE)")
-arborws_group.add_argument('--arbor-ws-api-scan-period', "-awsasp", required=False, dest="arborws_scan_period_s",
-                           action='store', type=int, default=os.environ.get('DIS_HIVEMON_ARBORWS_SCAN_PERIOD_S'),
+# TODO: Add support for multi-unit value parsing (e.g. "30s", "30m", "2h", "12h", "2d")
+arborws_group.add_argument('--arbor-ws-api-router-scan-period', "-awsrsp", required=False,
+                           dest="arborws_router_scan_period_s", action='store', type=int,
+                           default=os.environ.get('DIS_HIVEMON_ARBORWS_ROUTER_SCAN_PERIOD_S', 600),
+                           help="The period to scan the Arbor router and interface APIs for the refreshing "
+                                "of router/interface metadata (in seconds)")
+arborws_group.add_argument('--arbor-ws-api-router-savefile', "-awsrsf", required=False,
+                           dest="arborws_router_savefile", action='store', type=pathlib.Path,
+                           default=os.environ.get('DIS_HIVEMON_ARBORWS_ROUTER_SAVEFILE', "arbor-router-info.json"),
+                           help="A filename to load router/interface metadata from and save into when refreshing")
+arborws_group.add_argument('--arbor-ws-api-forensics-scan-period', "-awsfsp", required=False,
+                           dest="arborws_forensics_scan_period_s", action='store', type=int,
+                           default=os.environ.get('DIS_HIVEMON_ARBORWS_FORENSICS_SCAN_PERIOD_S'),
                            help="The period to check the Arbor forensics API for HIVE-signalled attacks (in seconds)")
-arborws_group.add_argument('--arbor-ws-api-scan-overlap', "-awsaso", required=False, dest="arborws_scan_overlap_s",
-                           action='store', type=int, default=os.environ.get('DIS_HIVEMON_ARBORWS_SCAN_OVERLAP_S', 240),
+arborws_group.add_argument('--arbor-ws-api-forensics-scan-overlap', "-awsfso", required=False,
+                           dest="arborws_forensics_scan_overlap_s", action='store', type=int,
+                           default=os.environ.get('DIS_HIVEMON_ARBORWS_FORENSICS_SCAN_OVERLAP_S', 240),
                            help="The amount of time, in seconds, to check before the scan period to pickup latent "
                                 "entries in the flow scan (default 240)")
 
@@ -254,7 +311,8 @@ hive_monitor = None
 # Determine which capture monitor to instantiate based on the supplied parameters
 capture_monitor = None
 arborws_params = args.arborws_url_prefix or args.arborws_api_key or args.arborws_api_insecure \
-                 or args.arborws_scan_period_s
+                 or args.arborws_forensics_scan_period_s or args.arborws_router_scan_period_s \
+                 or args.arborws_forensics_scan_overlap_s
 nfsql_params = args.nfsql_db_host or args.nfsql_db_port or args.nfsql_db_name or args.nfsql_db_user \
                or args.nfsql_db_pass or args.nfsql_router_list_file or args.nfsql_nfacctd_mapreload_cmd
 asn_res_params = args.int_name_regex or args.int_name_regex or args.int_name_lookup_file or args.int_desc_regex
@@ -287,21 +345,27 @@ if arborws_params:
         exit(1)
 
 if arborws_params:
-    if not args.arborws_scan_period_s:
-        args.arborws_scan_period_s = 60
+    if not args.arborws_forensics_scan_period_s:
+        args.arborws_forensics_scan_period_s = 60
     if not args.arborws_api_insecure:
         args.arborws_api_insecure = False
+
 
 event_loop = None
 
 
 # Callback function to handle traffic found event
-async def on_forged_traffic_found(attack_info: dict):
+async def on_forged_traffic_found(report_info_list):
     print(f"OBSERVED FORGED ATTACK TRAFFIC: ")
-    print(pprint.pformat(attack_info))
+    print(pprint.pformat(report_info_list))
+
+    redacted_report_info_list = create_redacted_report_info_list(report_info_list)
 
     if report_storage_path:
-        asyncio.create_task(save_forged_traffic_report_file(report_storage_path, args.report_store_format, attack_info))
+        report_list = report_info_list if args.report_store_format == "all-attributes" else redacted_report_info_list
+        asyncio.create_task(save_forged_traffic_report_file(report_storage_path, report_list))
+
+    await queue_report_for_upload(redacted_report_info_list)
 
 
 def make_redacted_report(report):
@@ -313,7 +377,11 @@ def make_redacted_report(report):
     return redacted_report
 
 
-async def save_forged_traffic_report_file(path, format, report_info_list):
+def create_redacted_report_info_list(report_info_list):
+    return [make_redacted_report(report) for report in report_info_list]
+
+
+async def save_forged_traffic_report_file(path, report_info_list):
     class SetEncoder(json.JSONEncoder):
         def default(self, obj):
             if isinstance(obj, set):
@@ -330,13 +398,6 @@ async def save_forged_traffic_report_file(path, format, report_info_list):
             dest_filename = f"forged-traffic-report.attack-{attack_id}.router-{router_id}.int-{interface_id}.json"
             report_filepath = report_storage_path.joinpath(dest_filename)
             with report_filepath.open('w') as reportfile:
-                if format == "all-attributes":
-                    pass
-                elif format == "only-source-attributes":
-                    report = make_redacted_report(report)
-                else:
-                    raise ValueError(f"Unknown report_storage_format \"{format}\"")
-
                 json.dump(report, reportfile, indent=4, cls=SetEncoder)
                 reportfile.write("\n")
                 reportfile.close()
@@ -377,8 +438,11 @@ async def main():
 
     capture_monitor.register_traffic_found_callback(on_forged_traffic_found)
 
+    dis_report_uploader = DisReportUploader(args, logger)
+
     await capture_monitor.startup(event_loop)
     await hive_monitor.startup(event_loop)
+    await dis_report_uploader.startup(event_loop)
 
 if __name__ == "__main__":
     asyncio.run(main())

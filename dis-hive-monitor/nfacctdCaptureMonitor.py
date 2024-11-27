@@ -23,7 +23,7 @@ class NfacctdTrafficMonitor(TrafficMonitorBase):
         self.args = args
         self.data_found_callback = None
         self.logger = logging.getLogger("Arbor WsApi Capture")
-        self.logger.info(f"Initialized with {pprint.pformat(self.__dict__)}")
+        self.logger.info(f"Initialized with \n{pprint.pformat(self.__dict__)}")
 
     async def startup(self, event_loop):
         if not (self.args.db_host or self.args.db_user):
