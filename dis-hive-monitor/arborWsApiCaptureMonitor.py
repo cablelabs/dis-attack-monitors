@@ -6,7 +6,7 @@ import os
 import sys
 from captureMonitorBase import TrafficMonitorBase
 import asyncio
-from ipaddress import IPv4Network
+from pathlib import Path
 import re
 from typing import Callable, Awaitable
 import aiohttp
@@ -17,15 +17,64 @@ import xml.etree.ElementTree as ET
 import json
 import logging
 import pprint
+import setproctitle
 
 
 class ArborWsApiTrafficMonitor(TrafficMonitorBase):
+    @staticmethod
+    def add_supported_arguments(arg_parser):
+        """Add any options supported by the Arbor traffic monitor"""
+        arborws_group = arg_parser.add_argument_group(
+            title="Arbor Forensics API-based Capture Options",
+            description="Options for performing forged traffic scanning using the Arbor/Sightline Forensics "
+                        "webservice.")
+        arborws_group.add_argument('--arbor-ws-uri-prefix', "-awsuri", required=True, dest="arborws_url_prefix",
+                                   action='store', type=str, default=os.environ.get('DIS_HIVEMON_ARBORWS_URI_PREFIX'),
+                                   help="Specify the Arbor API prefix to use (or set DIS_HIVEMON_ARBORWS_URI_PREFIX)")
+        arborws_group.add_argument('--arbor-ws-http-proxy', "-awshp,", required=False, action='store',
+                                   type=str, metavar="arborws_http_proxy",
+                                   default=os.environ.get('DIS_HIVEMON_ARBORWS_HTTP_PROXY'),
+                                   help="Specify the HTTP/HTTPS proxy URL for connecting to the Arbor Web Services API "
+                                        "(or DIS_HIVEMON_ARBORWS_HTTP_PROXY). e.g. 'http://10.0.1.11:1234'")
+        arborws_group.add_argument('--arbor-ws-api-key', "-awskey", required=True, dest="arborws_api_key",
+                                   action='store', type=str, default=os.environ.get('DIS_HIVEMON_ARBORWS_API_KEY'),
+                                   help="Specify the Arbor API token to use for REST calls "
+                                        "(or DIS_HIVEMON_ARBORWS_API_KEY)")
+        arborws_group.add_argument('--arbor-ws-api-insecure', "-aai", required=False, dest="arborws_api_insecure",
+                                   action='store_true', default=os.environ.get('DIS_HIVEMON_ARBORWS_API_INSECURE'),
+                                   help="Disable cert checks when invoking Arbor SP API REST calls against https URI prefixes "
+                                        "(or DIS_HIVEMON_ARBORWS_API_INSECURE)")
+        # TODO: Add support for multi-unit value parsing (e.g. "30s", "30m", "2h", "12h", "2d")
+        arborws_group.add_argument('--arbor-ws-api-router-scan-period', "-awsrsp", required=False,
+                                   dest="arborws_router_scan_period_s", action='store', type=int,
+                                   default=os.environ.get('DIS_HIVEMON_ARBORWS_ROUTER_SCAN_PERIOD_S', 600),
+                                   help="The period to scan the Arbor router and interface APIs for the refreshing "
+                                        "of router/interface metadata (in seconds)")
+        arborws_group.add_argument('--arbor-ws-api-router-savefile', "-awsrsf", required=False,
+                                   dest="arborws_router_savefile", action='store', type=Path,
+                                   default=os.environ.get('DIS_HIVEMON_ARBORWS_ROUTER_SAVEFILE',
+                                                          "arbor-router-info.json"),
+                                   help="A filename to load router/interface metadata from and save into when refreshing")
+        arborws_group.add_argument('--arbor-ws-api-forensics-scan-period', "-awsfsp", required=False,
+                                   dest="arborws_forensics_scan_period_s", action='store', type=int,
+                                   default=os.environ.get('DIS_HIVEMON_ARBORWS_FORENSICS_SCAN_PERIOD_S'),
+                                   help="The period to check the Arbor forensics API for HIVE-signalled attacks (in seconds)")
+        arborws_group.add_argument('--arbor-ws-api-forensics-scan-overlap', "-awsfso", required=False,
+                                   dest="arborws_forensics_scan_overlap_s", action='store', type=int,
+                                   default=os.environ.get('DIS_HIVEMON_ARBORWS_FORENSICS_SCAN_OVERLAP_S', 240),
+                                   help="The amount of time, in seconds, to check before the scan period to pickup latent "
+                                        "entries in the flow scan (default 240)")
+
+    @staticmethod
+    def get_redacted_args():
+        return ["arborws_api_key"]
+
     def __init__(self, args, logger, asn_resolver, hive_monitor):
         self.asn_resolver = asn_resolver
         self.hive_monitor = hive_monitor
         self.arborws_url_prefix = args.arborws_url_prefix
         self.arborws_api_key = args.arborws_api_key
-        self.arborws_api_insecure = args.arborws_api_insecure
+        self.arborws_api_insecure = getattr(args, 'arborws_api_insecure', False)
         self.router_scan_initial_delay_s = 10
         self.router_scan_period_s = args.arborws_router_scan_period_s
         self.router_savefile = args.arborws_router_savefile
@@ -41,7 +90,7 @@ class ArborWsApiTrafficMonitor(TrafficMonitorBase):
                                          or self.drop_interface_asns or self.drop_interface_regex
                                          or self.only_interface_regex)
         self.forensics_scan_initial_delay_s = 10
-        self.forensics_scan_period_s = args.arborws_forensics_scan_period_s
+        self.forensics_scan_period_s = getattr(args, 'arborws_forensics_scan_period_s', 60)
         self.forensics_scan_overlap_s = args.arborws_forensics_scan_overlap_s
         self.data_found_callback = None
         self.forensics_scan_task = None
@@ -58,6 +107,15 @@ class ArborWsApiTrafficMonitor(TrafficMonitorBase):
     async def startup(self, event_loop):
         self.event_loop = event_loop
         self.logger.debug(f"ArborWsApiTrafficMonitor: Performing startup")
+        if self.arborws_api_key:
+            cur_proc_title = setproctitle.getproctitle()
+            cur_proc_title = cur_proc_title.replace(self.arborws_api_key, "[token hidden]")
+
+        # Hide sensitive command line arguments
+        cur_proc_title = setproctitle.getproctitle()
+
+        setproctitle.setproctitle(cur_proc_title)
+
         await self._check_arborws_access()
         loaded = await self._load_router_metadata()
         self.router_info_collection_task = asyncio.create_task(self._periodic_router_metadata_collector(not loaded))
@@ -263,7 +321,7 @@ class ArborWsApiTrafficMonitor(TrafficMonitorBase):
                     self.logger.info("Refreshing router metadata...")
                     start_time = time.time()
                     router_query = ArborWsApiRouterQuery(self.arborws_url_prefix, self.arborws_api_key,
-                                                         validate_tls=self.arborws_api_insecure)
+                                                         validate_tls=not self.arborws_api_insecure)
                     await router_query.run_query(http_session)
                     query_result = router_query.get_router_metadata()
                     self.logger.debug("RETRIEVED router list:\n" + pprint.pformat(query_result))
@@ -295,7 +353,7 @@ class ArborWsApiTrafficMonitor(TrafficMonitorBase):
                         interface_query = ArborWsApiInterfaceQuery(self.arborws_url_prefix, self.arborws_api_key,
                                                                    f"{self.forensics_scan_period_s} seconds ago",
                                                                    "now",
-                                                                   validate_tls=self.arborws_api_insecure)
+                                                                   validate_tls=not self.arborws_api_insecure)
                         result = await interface_query.run_query(http_session, routers=[router_gid])
                         ints_for_router = interface_query.get_interface_metadata(asn_resolver=self.asn_resolver)
                         self.logger.info(f"_periodic_router_metadata_collector: RETRIEVED list of "
@@ -366,7 +424,7 @@ class ArborWsApiTrafficMonitor(TrafficMonitorBase):
                                          f"IN LAST {scan_window_size} seconds...")
                         traffic_query = ArborWsApiTrafficQuery(self.arborws_url_prefix, self.arborws_api_key,
                                                                f"{scan_window_size} seconds ago", "now",
-                                                               validate_tls=self.arborws_api_insecure)
+                                                               validate_tls=not self.arborws_api_insecure)
                         # Create a combined fingerprint for the chunk of the attack list
                         # Example fingerprint/filter: proto udp and ((src 1.2.3.4 and dst port 53) or (src 1.2.3.5 and dst port 123))
                         ip_filter = "".join(f"(src net {attack.get('srcNetwork')} "

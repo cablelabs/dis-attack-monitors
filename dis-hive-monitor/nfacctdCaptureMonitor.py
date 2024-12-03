@@ -15,6 +15,45 @@ import ifname
 import pprint
 
 class NfacctdTrafficMonitor(TrafficMonitorBase):
+    @staticmethod
+    def add_supported_arguments(arg_parser):
+        """Add any options supported by the nfacct traffic monitor"""
+        #
+        # NetFlow SQL Capture Options (nfacctd schema)
+        #
+        nfsql_group = arg_parser.add_argument_group(
+            title="NetFlow SQL DB Options",
+            description="Options for connecting to a SQL DB containing nfacctd-schema netflow data.")
+        nfsql_group.add_argument('--nfsql-db-host', "-dbsh", required=False, action='store', type=str,
+                                 default=os.environ.get('DIS_HIVEMON_NFSQL_DB_HOST'), dest="nfsql_db_host",
+                                 help="Specify the hostname of the database server to connect to for finding "
+                                      "captured traffic reports corresponding to a HIVE attack "
+                                      "(or set DIS_HIVEMON_DB_HOST)")
+        nfsql_group.add_argument('--nfsql-db-port', "-dbp", required=False, action='store', type=int,
+                                 default=os.environ.get('DIS_HIVEMON_NFSQL_DB_PORT'), dest="nfsql_db_port",
+                                 help="Specify the port of the database server to connect to for finding "
+                                      "captured traffic reports corresponding to a HIVE attack "
+                                      "(or set DIS_HIVEMON_DB_PORT)")
+        nfsql_group.add_argument('--nfsql-db-name', "-dbn", required=False, action='store', type=str,
+                                 default=os.environ.get('DIS_HIVEMON_NFSQL_DB_NAME'), dest="nfsql_db_name",
+                                 help="Specify the name of the database to connect to for finding "
+                                      "captured traffic reports corresponding to a HIVE attack "
+                                      "(or set DIS_HIVEMON_DB_NAM)")
+        nfsql_group.add_argument('--nfsql-db-user', "-dbu", required=False, action='store', type=str,
+                                 default=os.environ.get('DIS_HIVEMON_NFSQL_DB_USER'), dest="nfsql_db_user",
+                                 help="Specify the username for the SQL DB server to connect to for finding "
+                                      "captured traffic reports corresponding to a HIVE attack "
+                                      "(or set DIS_HIVEMON_DB_USER)")
+        nfsql_group.add_argument('--nfsql-db-password', "-dbpass", required=False, action='store', type=str,
+                                 default=os.environ.get('DIS_HIVEMON_NFSQL_DB_PASSWORD'), dest="nfsql_db_pass",
+                                 help="Specify the password for the DB server to connect to for finding "
+                                      "captured traffic reports corresponding to a HIVE attack "
+                                      "(or set DIS_HIVEMON_DB_PASSWORD)")
+
+    @staticmethod
+    def get_redacted_args():
+        return ["nfsql_db_user", "nfsql_db_pass"]
+
     def register_traffic_found_callback(self, callback: Callable[[int], Awaitable[None]]):
         self.data_found_callback = callback
         pass

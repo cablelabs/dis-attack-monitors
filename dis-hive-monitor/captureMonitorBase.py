@@ -6,11 +6,23 @@ from abc import ABC, abstractmethod
 from ipaddress import IPv4Network
 from typing import Callable, Awaitable
 
+
 # Abstract base class for NetFlow traffic capture monitoring
 class TrafficMonitorBase(ABC):
+    @staticmethod
+    def add_supported_arguments(self, arg_parser):
+        """Add any options supported by the traffic monitor"""
+        pass
+
+    @staticmethod
+    def get_redacted_args():
+        return []
+
     @abstractmethod
     async def startup(self, event_loop):
         """Perform any startup. This should try to check for error conditions up-front and fail fast"""
+        print("NetFlow extraction from SQL not yet supported - exiting.")
+        exit(2)
         pass
 
     @abstractmethod

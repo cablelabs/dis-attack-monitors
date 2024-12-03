@@ -9,6 +9,9 @@ import pprint
 
 class AsnResolver:
     def __init__(self, args):
+        if not (args.int_name_regex or args.int_name_regex or args.int_name_lookup_file or args.int_desc_regex):
+            print("You must specify at least one parameter to determine an ASN from a router interface name.")
+            exit(2)
         self.int_name_regex = re.compile(args.int_name_regex) if args.int_name_regex else None
         self.int_name_lookup_file = args.int_name_lookup_file
         self.int_desc_regex = re.compile(args.int_desc_regex) if args.int_desc_regex else None
