@@ -165,16 +165,16 @@ reporting_options.add_argument('--dis-server-client-key', "-dsckey", required=Tr
                                default=os.environ.get('DIS_HIVEMON_DIS_API_CLIENT_KEY'), dest="dis_api_client_key",
                                help="Specify the API key to use for submitting DIS FAST reports "
                                     "(or DIS_HIVEMON_DIS_API_CLIENT_KEY)")
-reporting_options.add_argument ('--report-store-dir', "-repd", required=False, action='store', type=str,
-                         default=os.environ.get('DIS_HIVEMON_REPORT_STORE_DIR'), dest="report_store_dir",
-                         help="Specify a directory to store generated Observed Forged Source Traffic Reports reports "
-                              "(or DIS_HIVEMON_REPORT_STORE_DIR)")
+reporting_options.add_argument('--report-store-dir', "-repd", required=False, action='store', type=str,
+                               default=os.environ.get('DIS_HIVEMON_REPORT_STORE_DIR'), dest="report_store_dir",
+                               help="Specify a directory to store generated Observed Forged Source Traffic Reports "
+                                    "reports (or DIS_HIVEMON_REPORT_STORE_DIR)")
 storage_format_choices=["only-source-attributes", "all-attributes"]
-reporting_options.add_argument ('--report-store-format', "-repf", required=False, action='store', type=str,
-                         default=os.environ.get('DIS_HIVEMON_REPORT_STORE_FORMAT', "only-source-attributes"),
-                         dest="report_store_format", choices=storage_format_choices,
-                         help="Specify the report options for writing Observed Forged Source Traffic Reports reports "
-                              f"(or DIS_HIVEMON_REPORT_STORE_FORMAT). One of {storage_format_choices}")
+reporting_options.add_argument('--report-store-format', "-repf", required=False, action='store', type=str,
+                               default=os.environ.get('DIS_HIVEMON_REPORT_STORE_FORMAT', "only-source-attributes"),
+                               dest="report_store_format", choices=storage_format_choices,
+                               help="Specify the report options for writing Observed Forged Source Traffic Reports "
+                                    f"reports (or DIS_HIVEMON_REPORT_STORE_FORMAT). One of {storage_format_choices}")
 
 # TODO: Make this selectable
 enabled_traffic_monitor_class = ArborWsApiTrafficMonitor
@@ -200,7 +200,7 @@ for arg, value in vars(args).items():
     if redact:  # Remove the value associated with the redacted argument name
         cur_proc_title = cur_proc_title.replace(value, "[value hidden]")
 
-dis_report_uploader = None
+dis_report_uploader = DisReportUploader(args, logger)
 
 # Process report options
 if args.report_store_dir:
@@ -220,13 +220,11 @@ async def on_forged_traffic_found(report_info_list):
     print(f"OBSERVED FORGED ATTACK TRAFFIC: ")
     print(pprint.pformat(report_info_list))
 
-    redacted_report_info_list = create_redacted_report_info_list(report_info_list)
-
     if report_storage_path:
         report_list = report_info_list if args.report_store_format == "all-attributes" else redacted_report_info_list
         asyncio.create_task(save_forged_traffic_report_file(report_storage_path, report_list))
 
-    await dis_report_uploader.queue_report_for_upload(redacted_report_info_list)
+    await dis_report_uploader.queue_reports_for_upload(report_info_list)
 
 
 def make_redacted_report(report):
@@ -269,27 +267,28 @@ async def save_forged_traffic_report_file(path, report_info_list):
 
 
 async def main():
-    logger.info("main(): Starting")
+    try:
+        logger.info("main(): Starting")
 
-    event_loop = asyncio.get_event_loop()
+        event_loop = asyncio.get_event_loop()
 
-    if args.int_name_lookup_file or args.int_desc_lookup_file:
-        print("Interface name/description lookup files not yet supported - exiting.")
-        exit(2)
+        if args.int_name_lookup_file or args.int_desc_lookup_file:
+            print("Interface name/description lookup files not yet supported - exiting.")
+            exit(2)
 
-    asn_resolver = AsnResolver(args)
-    hive_monitor = HiveMonitor(args, logger)
-    capture_monitor = ArborWsApiTrafficMonitor(args, logger, asn_resolver, hive_monitor)
+        asn_resolver = AsnResolver(args)
+        hive_monitor = HiveMonitor(args, logger)
+        capture_monitor = ArborWsApiTrafficMonitor(args, logger, asn_resolver, hive_monitor)
 
-    hive_monitor.add_capture_monitor(capture_monitor)
-    capture_monitor.register_traffic_found_callback(on_forged_traffic_found)
+        hive_monitor.add_capture_monitor(capture_monitor)
+        capture_monitor.register_traffic_found_callback(on_forged_traffic_found)
 
-    global dis_report_uploader
-    dis_report_uploader = DisReportUploader(args, logger)
-
-    await capture_monitor.startup(event_loop)
-    await hive_monitor.startup(event_loop)
-    await dis_report_uploader.startup(event_loop)
+        await dis_report_uploader.startup(event_loop)
+        await capture_monitor.startup(event_loop)
+        await hive_monitor.startup(event_loop)
+    except Exception as ex:
+        logger.error(f"Caught exception on startup: {ex}")
+        exit(1)
 
 if __name__ == "__main__":
     asyncio.run(main())

@@ -698,7 +698,7 @@ class ArborWsApiRouterQuery:
 
     async def run_query(self, client_session, search_limit=25000, timeout=300):
         # set up the url, endpoint, and request parameters to execute a query
-        url = f"{self.url_prefix }/arborws/admin/routers/"
+        url = f"{self.url_prefix}/arborws/admin/routers/"
         parameters = {'api_key': self.arbor_wsapikey,
                       'action': "list",
                       'limit': self.query_limit}

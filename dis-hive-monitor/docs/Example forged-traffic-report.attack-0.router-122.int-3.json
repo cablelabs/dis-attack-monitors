@@ -1,0 +1,28 @@
+{
+    "routerId": 122,
+    "interfaceId": 3,
+    "matchCount": 36,
+    "matchedPackets": 36,
+    "destIps": [
+        "10.96.40.1"
+    ],
+    "attackInfo": {
+        "attackId": 0,
+        "startTime": 1733210574,
+        "endTime": 1733210874,
+        "srcNetwork": "1.2.3.0/24",
+        "destPort": 123,
+        "reporters": [],
+        "messageType": "HIVE:ATTACK_START"
+    },
+    "interfaceInfo": {
+        "routerName": "dis-vl-router-2",
+        "name": "vmx2",
+        "id": null,
+        "type": "unknown",
+        "description": "PEER_AS_12345",
+        "ip": "10.96.30.1",
+        "speed": 1410065408,
+        "asn": 12345
+    }
+}
