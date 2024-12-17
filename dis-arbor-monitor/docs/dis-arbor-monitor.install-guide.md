@@ -1,6 +1,6 @@
 # Installation Guide for the DDoS Info Sharing (DIS) Netscout Arbor Sightline Monitor/Client
 
-### v 0.6
+### v 0.7
 
 ## 1. Introduction
 
@@ -16,7 +16,7 @@ Monitor/Client for Sightline 9.x systems.
 
 ## 2. Create an API key for the Monitor/Client
 
-Using the provided credentials, go to <https://<dis-server>/clients> and select
+Using the provided credentials, go to <https://dis-server-hostname/clients> and select
 "Provision New Client."
 
 NOTE: If you don’t already have credentials for the DIS management system,
@@ -35,9 +35,9 @@ Note: Disregard the "Installation" instructions provided in the UI for the
 time-being. These will be updated to reflect these installation instructions in
 a future update of the DIS backend.
 
-## 3. Create a sightline API key
+## 3. Create a Arbor SightLine REST API key
 
-If you don’t already have an API key setup, generating an Arbor API key requires
+If you don’t already have an API key setup, generating an Arbor REST API key requires
 access to the Arbor Sightline CLI. This is described in the "Enabling Customers
 to View Sightline Data in the Web Services API" section of the *Sightline and
 Threat Mitigation System User Guide*.
@@ -82,8 +82,7 @@ The DIS Arbor Monitor/Client requires the following:
     -   Access to the Arbor Netscout REST API (e.g.
         http://arbor-hostname-or-ip/)
 
-    -   A network connection allowing outbound HTTPS connections (specifically
-        to <https://<dis_site/>)
+    -   A network connection allowing outbound HTTPS connections (specifically to https://dis-server-hostname)
 
     -   Optionally, a https server certificate that the Sightline 9.x system can
         use to validate the server (when configuring Sightline webhooks using
@@ -94,19 +93,17 @@ The DIS Arbor Monitor/Client requires the following:
 
 For installing the DIS Arbor Monitor/Client, perform the following:
 
-1.  **Retrieve the latest Docker management script for the DDOS Info Sharing client:**
+1.  **Retrieve the latest Docker management script for the DDoS Info Sharing client:**
     
     ```
-    wget https://raw.githubusercontent.com/cablelabs/dis-arbor-monitor/master/arbormon-container.sh
-    wget https://raw.githubusercontent.com/cablelabs/dis-arbor-monitor/master/arbormon-container.conf
+    rm -fv arbormon-container.{sh,conf}
+    wget https://dissarm.net/assets/scripts/arbormon-container.{sh,conf}
     ```
 
 2.  **Install the script:**
 
     ```
-    sudo mkdir /etc/dis-arbor-monitor/
-    sudo install -v -o root -m 755 -D -t /etc/dis-arbor-monitor/arbormon-container.sh
-    sudo install -v -o root -m 600 -D -C -t /etc/dis-arbor-monitor/arbormon-container.conf
+    sudo install -v -o root -m 755 -D -t /etc/dis-arbor-monitor/ arbormon-container.*
     ```
 
 3.  **Configure the settings for your environment:**
@@ -279,6 +276,7 @@ For installing the DIS Arbor Monitor/Client, perform the following:
 
     ```
     DOCKER_CMD="sudo docker"
+    DEF_IMAGE_URI="https://dis-server-hostname/assets/docker-images/dis-arbor-monitor_latest.tar.gz"
     DEF_IMAGE_LOCATION="community.cablelabs.com:4567/dis-docker/dis-arbor-monitor"
     DEF_IMAGE_TAG=latest
     DEF_CONTAINER_NAME=dis-arbor-monitor-service
@@ -288,6 +286,7 @@ For installing the DIS Arbor Monitor/Client, perform the following:
     DEF_BIND_ADDRESS=0.0.0.0
     DEF_ARBOR_REST_API_PREFIX=https://arbor-001.acme.com 
     DEF_ARBOR_REST_API_TOKEN=Your-Arbor-API-Token
+    DEF_REPORT_CONSUMER_API_URI=https://dis-server-hostname
     DEF_REPORT_CONSUMER_API_KEY=Your-DIS-API-Key
     DEF_REPORT_CONSUMER_HTTP_PROXY=https://proxy.acme.com:8080
     DIS_ARBORMON_WEBHOOK_TOKEN=abcd1234
@@ -310,10 +309,10 @@ For installing the DIS Arbor Monitor/Client, perform the following:
     executing the script to have permissions set to allow access to the file or to
     use "sudo" to execute the script.
 
-4.  **Download the Docker image:**
+4.  **Download a DIS Arbor Monitor Docker image:**
 
     ```
-    /etc/dis-arbor-monitor/arbormon-container.sh docker-pull
+    /etc/dis-arbor-monitor/arbormon-container.sh docker-get-image
     ```
 
 5.  **Start the DIS Arbor Monitor Docker container:**

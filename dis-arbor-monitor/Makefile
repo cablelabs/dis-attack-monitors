@@ -1,9 +1,9 @@
 DOCKER_REGISTRY := artifactory.cablelabs.com
-DOCKER_IMAGE_TAG := test-sp-v10-endpoints
+DOCKER_IMAGE_TAG := latest
 DOCKER_IMAGE_PATH := dis-docker/dis-arbor-monitor:$(DOCKER_IMAGE_TAG)
 
 # This is to save/upload Docker images for participant hosts that can't download images using Docker
-DOCKER_SAVE_FILE_GZ := dis-arbor-monitor.$(DOCKER_IMAGE_TAG).gz
+DOCKER_SAVE_FILE_GZ := dis-arbor-monitor_$(DOCKER_IMAGE_TAG).tar.gz
 DOCKER_UPLOAD_PATH := "https://${DOCKER_REGISTRY}/artifactory/dis-files/com/cablelabs/dis/"
 
 docker-build:

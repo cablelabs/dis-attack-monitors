@@ -50,7 +50,8 @@ function print_usage()
     echo ""
     echo "   operation can be one of:"
     echo ""
-    echo "     docker-pull: Download the $shortname docker image"
+    echo "     docker-get-image: Download the $shortname docker image from a HTTP repository"
+    echo "     docker-pull-image: Download the $shortname docker image from a Docker repository"
     echo "     docker-run: Create and start the $shortname docker container"
     echo "     docker-run-interactive: Start a shell to run $shortname (for debugging)"
     echo "     docker-status: Show the status of the $shortname docker container"
@@ -70,6 +71,8 @@ function print_usage()
     echo ""
     echo "   [--docker-image <docker image ID>]"
     echo "       (default \"$DEF_IMAGE_LOCATION\")"
+    echo "   [--docker-image-url <docker image URL>]"
+    echo "       (default \"$DEF_DOCKER_IMAGE_URI\")"
     echo "   [--docker-image-tag <docker image tag>]"
     echo "       (default \"$DEF_IMAGE_TAG\")"
     echo "   [--docker-name <docker name to assign>]"
@@ -127,6 +130,7 @@ function process_arguments()
 
     operation=""
     docker_image_id="$DEF_IMAGE_LOCATION"
+    docker_image_uri="$DEF_DOCKER_IMAGE_URI"
     docker_image_tag="$DEF_IMAGE_TAG"
     container_name="$DEF_CONTAINER_NAME"
     tls_cert_chain_file=$(abs_path_for_file "$DEF_TLS_CERT_CHAIN_FILE")
@@ -156,9 +160,13 @@ function process_arguments()
 
     while [[ $1 == --* ]]; do
         opt_name=$1
-        if [ "$opt_name" == "--docker-image" ]; then
+        if [ "$opt_name" == "--docker-pull-image" ]; then
             shift
             docker_image_id="$1"
+            shift || bailout_with_usage "missing parameter to $opt_name"
+        elif [ "$opt_name" == "--docker-get-image" ]; then
+            shift
+            docker_image_uri="$1"
             shift || bailout_with_usage "missing parameter to $opt_name"
         elif [ "$opt_name" == "--docker-image-tag" ]; then
             shift
@@ -296,6 +304,7 @@ function process_arguments()
 
     if [ ! -z $debug ]; then
         echo "docker_image_id: $docker_image_id"
+        echo "docker_image_uri: $docker_image_uri"
         echo "docker_image_tag: $docker_image_tag"
         echo "docker_as_user: $docker_as_user"
         echo "docker_as_group: $docker_as_group"
@@ -324,10 +333,29 @@ function process_arguments()
     fi
 }
 
-function docker-pull()
+function docker-get-image()
 {
-    echo "Pulling docker image from $docker_image_id:$docker_image_tag"
-	$DOCKER_CMD pull $docker_image_id:$docker_image_tag
+    echo "HTTP GET-ing docker image from $docker_image_uri..."
+	  image_filename=$(basename $docker_image_uri)
+	  rm -fv "$image_filename"
+	  wget "$docker_image_uri" "$image_filename"
+	  if [[ ${image_filename: -3} == .gz ]]; then
+	      echo "Decompressing $image_filename..."
+        gunzip $image_filename
+        image_filename=$(basename $image_filename .gz)
+    elif [[ ${image_filename: -3} == .bz2 ]]; then
+	      echo "Decompressing $image_filename..."
+        bunzip2 $image_filename
+        image_filename=$(basename $image_filename .bz2)
+    fi
+    echo "Loading Docker image $image_filename into local Docker service..."
+    $DOCKER_CMD load < "$image_filename"
+}
+
+function docker-pull-image()
+{
+    echo "Pulling docker image from Docker repository $docker_image_id:$docker_image_tag"
+	  $DOCKER_CMD pull $docker_image_id:$docker_image_tag
 }
 
 function docker-run()
@@ -541,7 +569,8 @@ function docker-update()
     echo "Updating container image \"$container_name\""
     docker-rm
     sleep 1
-    docker-pull
+    # TODO: Add parameter to specify Docker or HTTP repository
+    docker-get-image
     docker-run
 }
 

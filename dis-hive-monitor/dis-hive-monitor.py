@@ -20,8 +20,6 @@ from hiveMonitor import HiveMonitor
 from localFileReportWriter import LocalFileReportWriter
 from disReportUploader import DisReportUploader
 
-# TODO: Add proxy support for accessing Arbor/Sightline
-
 arg_parser = argparse.ArgumentParser(description='Connects to the HIVE server and performs local scanning '
                                                  'for ongoing forged attack traffic signalled by the HIVE server. '
                                                  'Matching forged traffic sources can be reported and uploaded '
@@ -216,7 +214,6 @@ async def on_forged_traffic_found(report_list):
         logger.info(f"Uploading {len(report_list)} reports to DIS")
         await dis_report_uploader.queue_reports_for_upload(report_list)
 
-
 def make_redacted_report(report):
     redacted_report = copy.deepcopy(report)
     redacted_report['numDestIps'] = len(report['destIps'])
@@ -228,7 +225,6 @@ def make_redacted_report(report):
 
 def create_redacted_report_info_list(report_info_list):
     return [make_redacted_report(report) for report in report_info_list]
-
 
 async def main():
     try:
