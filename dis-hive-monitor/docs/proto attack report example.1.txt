@@ -1,0 +1,18 @@
+attack_report = {"attack_id": hive_attack_id,
+             "start_time": hive_start_time,
+             "stop_time": hive_stop_time,
+             "source_network": hive_src_ip, # /32 or /24
+             "dest_port": hive_dest_port,
+             "reporters": ["AmpPot", "HopScotch"],
+             "match_count": n > 2,
+             "matched_packets": n,
+             "router_name": "",     # ONLY LOCAL
+             "router_hostname": "",  # ONLY LOCAL
+             "interface_name": "",   # ONLY LOCAL
+             "interface_description": "",   # ONLY LOCAL
+             "interface_type": "",   # ONLY LOCAL
+             "interface_address": "",  # ONLY LOCAL
+             "managed_objects": "",   # ONLY LOCAL
+             "peer_asn": n,
+             "report-format": report_storage_format,
+             "report-version": {"major": 1, "minor": 0}}

@@ -4,8 +4,16 @@ import asyncio
 import aiohttp
 import time
 import pprint
-from asyncio import Queue
+import json
+import ipaddress
+from asyncio import Event
 
+
+class ReportJsonEncoder(json.JSONEncoder):
+    def default(self, obj):
+        if isinstance(obj,(ipaddress.IPv4Address, ipaddress.IPv6Address, ipaddress.IPv4Network, ipaddress.IPv6Network)):
+            return str(obj)
+        return super().default(obj)
 
 class DisReportUploader:
     def __init__(self, args, base_logger):
@@ -14,7 +22,8 @@ class DisReportUploader:
         self.dis_api_client_key = args.dis_api_client_key
         self.dis_api_http_proxy = args.dis_api_http_proxy
         self.report_uploader_task = None
-        self.report_queue = Queue()
+        self.report_queue = []
+        self.report_ready = Event()
         self.upload_retry_time_s = 120 # 2 minutes
         self.print_ex_backtraces = True
         self.logger = logging.getLogger(base_logger.name + " DIS-FAST Uploader")
@@ -29,8 +38,9 @@ class DisReportUploader:
     async def queue_reports_for_upload(self, reports):
         for observation_report in reports:
             fast_report = self._create_fast_report(observation_report)
-            await self.report_queue.put(fast_report)
+            self.report_queue.append(fast_report)
             self.logger.info(f"Queued report for upload: \n{pprint.pformat(fast_report, compact=True)}")
+            self.report_ready.set()
 
     async def _check_dis_client_access(self):
         url = f"{self.dis_api_base_url}/v1/client/me"
@@ -67,14 +77,17 @@ class DisReportUploader:
         url = f"{self.dis_api_base_url}/v1/data/traceback-report"
         query_params = {"api_key": self.dis_api_client_key}
         self.logger.info(f"Attempting to upload {len(fast_reports)} reports to {url}")
-        fast_report_upload = {"version": 1, "tracebackReports": fast_reports}
+        combined_fast_report = {"version": 1, "tracebackReports": fast_reports}
+        fast_report_upload = json.dumps(combined_fast_report, cls=ReportJsonEncoder)
         try:
             async with aiohttp.ClientSession() as http_session:
                 start_time = time.time()
-                async with http_session.post(url, params=query_params, json=fast_report_upload,
+                async with http_session.post(url, params=query_params, data=fast_report_upload,
+                                             headers={"Content-type": "application/json"},
                                              raise_for_status=True) as response:
                     upload_time = time.time() - start_time
-                    self.logger.info(f"Uploaded {len(fast_reports)} reports in {upload_time:0.2f}")
+                    self.logger.info(f"Uploaded {len(fast_reports)} reports in {upload_time:0.2f} "
+                                     f"(response: {response})")
                     return True
         except Exception as ex:
             self.logger.info(f"Could not upload {len(fast_reports)} reports to {url}: {ex}",
@@ -83,17 +96,16 @@ class DisReportUploader:
 
     async def _report_uploader_loop(self):
         self.logger.info("Report uploader loop started.")
-        pending_uploads = []
         while True:
             try:
-                wait_timeout = self.upload_retry_time_s if pending_uploads else None
+                wait_timeout = self.upload_retry_time_s if self.report_queue else None
                 try:
-                    fast_report = await asyncio.wait_for(self.report_queue.get(), timeout=wait_timeout)
-                    if fast_report:
-                        pending_uploads.append(fast_report)
+                    await asyncio.wait_for(self.report_ready.wait(), timeout=wait_timeout)
+                    self.report_ready.clear()
+                    if await self._upload_fast_reports(self.report_queue):
+                        self.report_queue = []
                 except TimeoutError:
-                    self.logger.info(f"Attempting upload retry of {len(pending_uploads)} pending report uploads")
-                report_body = {"version": 1, "tracebackReports": pending_uploads}
+                    self.logger.info(f"Attempting upload retry of {len(self.report_queue)} pending report uploads")
             except Exception as ex:
                 self.logger.warning(f"Caught exception uploading DIS-FAST report: {ex}",
                                     exc_info=self.print_ex_backtraces)

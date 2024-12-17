@@ -3,16 +3,13 @@
 #
 # This software is made available according to the terms in the LICENSE.txt accompanying this code
 #
-
 import argparse
 import asyncio
 import copy
-from pathlib import Path
 import json
 import os
 import logging
 import pprint
-from ipaddress import IPv4Network
 import setproctitle
 
 # Import the concrete classes
@@ -20,6 +17,7 @@ from arborWsApiCaptureMonitor import ArborWsApiTrafficMonitor
 # from nfacctdCaptureMonitor import NfacctdTrafficMonitor
 from asnResolver import AsnResolver
 from hiveMonitor import HiveMonitor
+from localFileReportWriter import LocalFileReportWriter
 from disReportUploader import DisReportUploader
 
 # TODO: Add proxy support for accessing Arbor/Sightline
@@ -169,9 +167,9 @@ reporting_options.add_argument('--report-store-dir', "-repd", required=False, ac
                                default=os.environ.get('DIS_HIVEMON_REPORT_STORE_DIR'), dest="report_store_dir",
                                help="Specify a directory to store generated Observed Forged Source Traffic Reports "
                                     "reports (or DIS_HIVEMON_REPORT_STORE_DIR)")
-storage_format_choices=["only-source-attributes", "all-attributes"]
+storage_format_choices=["file-per-report", "file-per-report-date-subdirs", "combined-report-file"]
 reporting_options.add_argument('--report-store-format', "-repf", required=False, action='store', type=str,
-                               default=os.environ.get('DIS_HIVEMON_REPORT_STORE_FORMAT', "only-source-attributes"),
+                               default=os.environ.get('DIS_HIVEMON_REPORT_STORE_FORMAT', "file-per-report"),
                                dest="report_store_format", choices=storage_format_choices,
                                help="Specify the report options for writing Observed Forged Source Traffic Reports "
                                     f"reports (or DIS_HIVEMON_REPORT_STORE_FORMAT). One of {storage_format_choices}")
@@ -200,31 +198,23 @@ for arg, value in vars(args).items():
     if redact:  # Remove the value associated with the redacted argument name
         cur_proc_title = cur_proc_title.replace(value, "[value hidden]")
 
-dis_report_uploader = DisReportUploader(args, logger)
 
-# Process report options
-if args.report_store_dir:
-    report_storage_path = Path(args.report_store_dir)
-    if not report_storage_path.is_dir():
-        logger.error(f"The report storage path is not a directory (dest: \"{args.report_store_dir}\")")
-        exit(30)
-    if not os.access(report_storage_path.absolute(), os.W_OK):
-        logger.error(f"The report storage path is not writable (dest: \"{args.report_store_dir}\")")
-        exit(31)
-else:
-    report_storage_path = None
+local_report_writer = LocalFileReportWriter(args, logger)
+dis_report_uploader = DisReportUploader(args, logger)
 
 
 # Callback function to handle traffic found event
-async def on_forged_traffic_found(report_info_list):
-    print(f"OBSERVED FORGED ATTACK TRAFFIC: ")
-    print(pprint.pformat(report_info_list))
+async def on_forged_traffic_found(report_list):
+    logger.info(f"OBSERVED FORGED ATTACK TRAFFIC: ")
+    logger.info(pprint.pformat(report_list))
 
-    if report_storage_path:
-        report_list = report_info_list if args.report_store_format == "all-attributes" else redacted_report_info_list
-        asyncio.create_task(save_forged_traffic_report_file(report_storage_path, report_list))
+    if local_report_writer:
+        logger.info(f"Saving {len(report_list)} reports to local storage")
+        asyncio.create_task(local_report_writer.save_forged_traffic_report(report_list))
 
-    await dis_report_uploader.queue_reports_for_upload(report_info_list)
+    if dis_report_uploader:
+        logger.info(f"Uploading {len(report_list)} reports to DIS")
+        await dis_report_uploader.queue_reports_for_upload(report_list)
 
 
 def make_redacted_report(report):
@@ -238,32 +228,6 @@ def make_redacted_report(report):
 
 def create_redacted_report_info_list(report_info_list):
     return [make_redacted_report(report) for report in report_info_list]
-
-
-async def save_forged_traffic_report_file(path, report_info_list):
-    class SetEncoder(json.JSONEncoder):
-        def default(self, obj):
-            if isinstance(obj, set):
-                return list(obj)
-            if isinstance(obj, IPv4Network):
-                return str(obj)
-            return json.JSONEncoder.default(self, obj)
-
-    for report in report_info_list:
-        try:
-            attack_id = report['attackInfo']['attackId']
-            router_id = report['routerId']
-            interface_id = report['interfaceId']
-            dest_filename = f"forged-traffic-report.attack-{attack_id}.router-{router_id}.int-{interface_id}.json"
-            report_filepath = report_storage_path.joinpath(dest_filename)
-            with report_filepath.open('w') as reportfile:
-                json.dump(report, reportfile, indent=4, cls=SetEncoder)
-                reportfile.write("\n")
-                reportfile.close()
-                logger.info(f"Saved report on attack {attack_id} to {report_filepath.absolute()}")
-        except Exception as ex:
-            warn_msg = f"Caught an exception saving the report for attack ({ex}): \n{report}"
-            logger.warning(warn_msg)
 
 
 async def main():
@@ -283,6 +247,7 @@ async def main():
         hive_monitor.add_capture_monitor(capture_monitor)
         capture_monitor.register_traffic_found_callback(on_forged_traffic_found)
 
+        await local_report_writer.startup(event_loop)
         await dis_report_uploader.startup(event_loop)
         await capture_monitor.startup(event_loop)
         await hive_monitor.startup(event_loop)
