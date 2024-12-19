@@ -11,6 +11,7 @@ import os
 import logging
 import pprint
 import setproctitle
+import sys
 
 # Import the concrete classes
 from arborWsApiCaptureMonitor import ArborWsApiTrafficMonitor
@@ -20,157 +21,219 @@ from hiveMonitor import HiveMonitor
 from localFileReportWriter import LocalFileReportWriter
 from disReportUploader import DisReportUploader
 
-arg_parser = argparse.ArgumentParser(description='Connects to the HIVE server and performs local scanning '
-                                                 'for ongoing forged attack traffic signalled by the HIVE server. '
-                                                 'Matching forged traffic sources can be reported and uploaded '
-                                                 'to assist with forged traffic traceback. This service can use '
-                                                 'nfacctd, Arbor NetScout, or other services to identify matching '
-                                                 'flows.')
-#
-# General options
-#
-arg_parser.add_argument('--debug', '-d', required=False, action='store_true',
-                        default=os.environ.get('DIS_HIVEMON_DEBUG', False),
-                        help="Enable debug output/checks")
-arg_parser.add_argument('--log-file', '-lf', required=False, action='store', type=open,
-                        default=os.environ.get('DIS_HIVEMON_LOG_FILE'),
-                        help='Specify the path and filename of the log file to write')
-arg_parser.add_argument('--log-prefix', "-lp", required=False, action='store', type=str, dest="prefix_string",
-                        default=os.environ.get('DIS_HIVEMON_LOG_PREFIX', ""),
-                        help="Specify a prefix string for logging error/info messages "
-                             "(or DIS_HIVEMON_LOG_PREFIX)")
-arg_parser.add_argument('--report-status-interval', "-rsi", required=False, action='store', type=int,
-                        dest='report_status_interval_s',
-                        default=os.environ.get('DIS_HIVEMON_STATUS_REPORT_INTERVAL_S', 0),
-                        help="the amount of time to wait between generating status reports "
-                             "(or DIS_HIVEMON_STATUS_REPORT_INTERVAL_S) (0: disabled)")
-arg_parser.add_argument('--dump-list-updates', "-du", required=False, action='store_true',
-                        default=False, help="Print the complete attack list after every update message.")
-arg_parser.add_argument('--drop-routers', "-dr", required=False, action='store', type=str,
-                        default=os.environ.get('DIS_HIVEMON_DROP_ROUTERS'), dest="drop_routers",
-                        help="Specify a list of one or more router names and/or IP addresses, separated with commas, "
-                             f"to skip for forged traffic scanning and reporting (or DIS_HIVEMON_DROP_ROUTERS).")
-arg_parser.add_argument('--only-routers', "-or", required=False, action='store', type=str,
-                        default=os.environ.get('DIS_HIVEMON_ONLY_ROUTERS'), dest="only_routers",
-                        help="Specify a list of one or more router names and/or IP addresses, separated with commas, "
-                             f"to skip for forged traffic scanning and reporting (or DIS_HIVEMON_DROP_ROUTERS).")
-arg_parser.add_argument('--drop-interface-types', "-dit", required=False, action='store', type=str,
-                        default=os.environ.get('DIS_HIVEMON_DROP_INT_TYPES'), dest="drop_interface_types",
-                        help="Specify a list of one or more interface type strings, separated with commas, "
-                             f"to skip for forged traffic scanning and reporting (or DIS_HIVEMON_DROP_INT_TYPES).")
-arg_parser.add_argument('--only-interface-types', "-oit", required=False, action='store', type=str,
-                        default=os.environ.get('DIS_HIVEMON_ONLY_INT_TYPES'), dest="only_interface_types",
-                        help="Specify a list of one or more interface type strings, separated with commas, "
-                             f"to scan for forged traffic scanning and reporting (or DIS_HIVEMON_ONLY_INT_TYPES).")
-arg_parser.add_argument('--drop-interface-asns', "-diasn", required=False, action='store', type=str,
-                        default=os.environ.get('DIS_HIVEMON_DROP_INTERFACE_ASNS'), dest="drop_interface_asns",
-                        help="Specify a list of interfaces, by ASN, to skip for forged traffic scanning and  "
-                             f"reporting (or DIS_HIVEMON_DROP_ROUTER_NAMES).")
-arg_parser.add_argument('--drop-interface-regex', "-dir", required=False, action='store', type=str,
-                        default=os.environ.get('DIS_HIVEMON_DROP_INT_REGEX'), dest="drop_interface_regex",
-                        help="Skip scanning router interfaces with SNMP description strings which match the "
-                             f"designated regular expression. (or DIS_HIVEMON_DROP_INT_REGEX).")
-arg_parser.add_argument('--only-interface-regex', "-oir", required=False, action='store', type=str,
-                        default=os.environ.get('DIS_HIVEMON_ONLY_INT_REGEX'), dest="only_interface_regex",
-                        help="Only scan router interfaces with SNMP description strings which match the "
-                             f"designated regular expression. (or DIS_HIVEMON_ONLY_INT_REGEX).")
-#
-# HIVE connection options
-#
-hive_opt_group = arg_parser.add_argument_group(
-                         title="Options for connecting to the HIVE server")
-arg_default = os.environ.get('DIS_HIVEMON_HIVE_URL')
-hive_opt_group.add_argument('--hive-url', "-hu", required=not arg_default,
-                            action='store', type=str, default=arg_default,
-                            help="Specify the URL to the HIVE server to receive honeypot attack reports "
-                                 "(e.g. 'https://arbor001.acme.com') "
-                                 "(or set DIS_HIVEMON_HIVE_URL)")
-hive_opt_group.add_argument('--hive-client-cert-file', "-ccf", required=False, action='store', type=open,
-                            default=os.environ.get('DIS_HIVEMON_HIVE_CLIENT_CERT_FILE'),
-                            help="the client cert file to use when connecting to the HIVE server"
-                                 "when an https HIVE URL is specified. Note that this will only "
-                                 "be used if/when the server requires client cert validation. "
-                                 "(or set DIS_HIVEMON_HIVE_CLIENT_CERT_FILE)")
-hive_opt_group.add_argument('--hive-client-cert-key-file', "-cckf", required=False, action='store', type=open,
-                            default=os.environ.get('DIS_HIVEMON_HIVE_CLIENT_CERT_KEY_FILE'),
-                            help="the file containing the private key associated witn the public "
-                                 "key in the specified client cert when an https HIVE URL is "
-                                 "specified. Note that this will only be used if/when the server "
-                                 "requires client cert validation. (or set DIS_HIVEMON_HIVE_CLIENT_CERT_KEY_FILE)")
-hive_opt_group.add_argument('--hive-ca-certs-file', "-caf", required=False, action='store', type=open,
-                            default=os.environ.get('DIS_HIVEMON_HIVE_CA_CERTS_FILE'),
-                            help="the file containing a list of CA certificates for validating the server"
-                                 "(or set DIS_HIVEMON_HIVE_CA_CERTS_FILE)")
-hive_opt_group.add_argument('--hive-retry-interval', "-p", required=False, action='store', type=int,
-                            default = os.environ.get('DIS_HIVEMON_HIVE_URL_RETRY_S', 30),
-                            help="the retry interval for retrying the connection to the HIVE server"
-                                 "if/when the connection fails (or set DIS_HIVEMON_HIVE_URL_RETRY_S)")
-hive_opt_group.add_argument('--hive-proxy-url', "-hpu", required=False, action='store', type=str,
-                            default=os.environ.get('DIS_HIVEMON_HIVE_PROXY',
-                                                   os.environ.get('HTTPS_PROXY', os.environ.get('HTTP_PROXY'))),
-                            help="Specify a proxy server to use to make the websocket connection to the HIVE server"
-                                 " (or set DIS_HIVEMON_HIVE_PROXY, HTTPS_PROXY or HTTP_PROXY environment variables)")
-hive_opt_group.add_argument('--add-attack-entry', "-aae", required=False, action='append', type=str,
-                            dest='test_entries', default=os.environ.get('DIS_HIVEMON_ATTACK_ENTRIES'),
-                            help="one or more attack entries of the form:"
-                                 "{'attackId': int, 'durationMinutes': int, 'srcNetwork': str, 'destPort':int}"
-                                 "(or DIS_HIVEMON_ATTACK_ENTRIES separated by ';')")
-#
-# ASN resolver options
-#
+def init_argparser():
+    arg_parser = argparse.ArgumentParser(description='Connects to the HIVE server and performs local scanning '
+                                                     'for ongoing forged attack traffic signalled by the HIVE server. '
+                                                     'Matching forged traffic sources can be locally recorded and/or  '
+                                                     'uploaded to perform forged traffic traceback. This service can use '
+                                                     'nfacctd, Arbor NetScout, or other services to identify matching '
+                                                     'flows.')
+    #
+    # General options
+    #
+    arg_parser.add_argument('conf_file',
+                            help="Set conf file")
+    arg_parser.add_argument('--debug', '-d', required=False, action='store_true',
+                            default=os.environ.get('DIS_HIVEMON_DEBUG', False),
+                            help="Enable debug output/checks (or DIS_HIVEMON_DEBUG)")
+    arg_parser.add_argument('--log-file', '-lf', required=False, action='store', type=open,
+                            default=os.environ.get('DIS_HIVEMON_LOG_FILE'),
+                            help='Specify the path and filename of the log file to write (or DIS_HIVEMON_LOG_FILE)')
+    arg_parser.add_argument('--log-prefix', "-lp", required=False, action='store', type=str, dest="prefix_string",
+                            default=os.environ.get('DIS_HIVEMON_LOG_PREFIX', ""),
+                            help="Specify a prefix string for logging error/info messages "
+                                 "(or DIS_HIVEMON_LOG_PREFIX)")
+    arg_parser.add_argument('--report-status-interval', "-rsi", required=False, action='store', type=int,
+                            dest='report_status_interval_s',
+                            default=os.environ.get('DIS_HIVEMON_STATUS_REPORT_INTERVAL_S', 0),
+                            help="the amount of time to wait between generating status reports "
+                                 "(or DIS_HIVEMON_STATUS_REPORT_INTERVAL_S) (0: disabled)")
+    arg_parser.add_argument('--log-list-updates', "-du", required=False, action='store_true',
+                            default=os.environ.get('DIS_HIVEMON_LOG_LIST_UPDATES'),
+                            help="Print the complete attack list after every update message "
+                                 "(or DIS_HIVEMON_LOG_LIST_UPDATES).")
+    arg_parser.add_argument('--drop-routers', "-dr", required=False, action='store', type=str,
+                            default=os.environ.get('DIS_HIVEMON_DROP_ROUTERS'), dest="drop_routers",
+                            help="Specify a list of one or more router names and/or IP addresses, separated with commas, "
+                                 f"to skip for forged traffic scanning and reporting (or DIS_HIVEMON_DROP_ROUTERS).")
+    arg_parser.add_argument('--only-routers', "-or", required=False, action='store', type=str,
+                            default=os.environ.get('DIS_HIVEMON_ONLY_ROUTERS'), dest="only_routers",
+                            help="Specify a list of one or more router names and/or IP addresses, separated with commas, "
+                                 f"to skip for forged traffic scanning and reporting (or DIS_HIVEMON_ONLY_ROUTERS).")
+    arg_parser.add_argument('--drop-interface-types', "-dit", required=False, action='store', type=str,
+                            default=os.environ.get('DIS_HIVEMON_DROP_INT_TYPES'), dest="drop_interface_types",
+                            help="Specify a list of one or more interface type strings, separated with commas, "
+                                 f"to skip for forged traffic scanning and reporting (or DIS_HIVEMON_DROP_INT_TYPES).")
+    arg_parser.add_argument('--only-interface-types', "-oit", required=False, action='store', type=str,
+                            default=os.environ.get('DIS_HIVEMON_ONLY_INT_TYPES'), dest="only_interface_types",
+                            help="Specify a list of one or more interface type strings, separated with commas, "
+                                 f"to scan for forged traffic scanning and reporting (or DIS_HIVEMON_ONLY_INT_TYPES).")
+    arg_parser.add_argument('--drop-interface-asns', "-diasn", required=False, action='store', type=str,
+                            default=os.environ.get('DIS_HIVEMON_DROP_INTERFACE_ASNS'), dest="drop_interface_asns",
+                            help="Specify a list of interfaces, by ASN, to skip for forged traffic scanning and  "
+                                 f"reporting (or DIS_HIVEMON_DROP_INTERFACE_ASNS).")
+    arg_parser.add_argument('--drop-interface-regex', "-dir", required=False, action='store', type=str,
+                            default=os.environ.get('DIS_HIVEMON_DROP_INT_REGEX'), dest="drop_interface_regex",
+                            help="Skip scanning router interfaces with SNMP description strings which match the "
+                                 f"designated regular expression. (or DIS_HIVEMON_DROP_INT_REGEX).")
+    arg_parser.add_argument('--only-interface-regex', "-oir", required=False, action='store', type=str,
+                            default=os.environ.get('DIS_HIVEMON_ONLY_INT_REGEX'), dest="only_interface_regex",
+                            help="Only scan router interfaces with SNMP description strings which match the "
+                                 f"designated regular expression. (or DIS_HIVEMON_ONLY_INT_REGEX).")
+    #
+    # HIVE connection options
+    #
+    hive_opt_group = arg_parser.add_argument_group(title="Options for connecting to the HIVE server")
 
-# TODO: Add option to use Arbor to resolve ASNs
-# TODO: Add options to ignore given ASNs, routers, and/or interface names/types
-asn_lookup_options = arg_parser.add_argument_group(
-                         title="Options for determining an ASN from a router interface name or description",
-                         description="These options provide a variety of ways to map or extract "
-                                     "an ASN from an interface name or description - so the source "
-                                     "of captured traffic can be associated with an ASN.")
-ex_asn_group = asn_lookup_options.add_mutually_exclusive_group(required=True)
-ex_asn_group.add_argument('--int-name-asn-regex', "-inameregex", required=False, action='store', type=str,
-                          default=os.environ.get('DIS_HIVEMON_INT_NAME_ASN_REGEX'), dest="int_name_regex",
-                          help="Specify a regular expression that can be used to extract ASNs from "
-                               "interface names (as group 1 of the regex) (or set DIS_HIVEMON_INT_NAME_ASN_REGEX)")
-ex_asn_group.add_argument('--int-name-asn-lookup-file', "-inlfile", required=False, action='store', type=open,
-                          default=os.environ.get('DIS_ HIVEMON_INT_NAME_LOOKUP_FILE'), dest="int_name_lookup_file",
-                          help="Specify the file containing a list of ruleset used to determine ASN names "
-                               "from interface names (or set DIS_HIVEMON_INT_NAME_LOOKUP_FILE)")
-ex_asn_group.add_argument('--int-desc-asn-regex', "-idescregex", required=False, action='store', type=str,
-                          default=os.environ.get('DIS_HIVEMON_INT_DESC_ASN_REGEX'), dest="int_desc_regex",
-                          help="Specify the regular expression to extract the ASN from the interface description "
-                               "(or DIS_HIVEMON_INT_DESC_ASN_REGEX)")
-ex_asn_group.add_argument('--int-desc-asn-lookup-file', "-idlfile", required=False, action='store', type=open,
-                          default=os.environ.get('DIS_HIVEMON_INT_DESC_LOOKUP_FILE'), dest="int_desc_lookup_file",
-                          help="Specify the file containing a list of ruleset used to determine ASN names "
-                               "from interface descriptions (or set DIS_HIVEMON_INT_DESC_LOOKUP_FILE)")
-#
-# Observed forged traffic report storing/forwarding options
-#
-reporting_options = arg_parser.add_argument_group(
-                         title="Options for the storing and forwarding of Forged Address Source Traffic Reports")
-reporting_options.add_argument('--dis-server-api-uri', "-dsuri", required=True, action='store', type=str,
-                               default=os.environ.get('DIS_HIVEMON_DIS_API_URI'), dest="dis_api_uri",
-                               help="Specify the API prefix of the DIS server to submit DIS Forged Address "
-                                    "Source Traceback (FAST) Reports (or DIS_HIVEMON_REPORT_API_URI)")
-reporting_options.add_argument('--dis-server-http-proxy', "-dshp,", required=False, action='store',
-                               type=str, dest="dis_api_http_proxy",
-                               default=os.environ.get('DIS_HIVEMON_DIS_API_HTTP_PROXY'),
-                               help="Specify the HTTP/HTTPS proxy URL for connecting to the DIS server "
-                                    "(or DIS_HIVEMON_DIS_API_HTTP_PROXY). e.g. 'http://10.0.1.11:1234'")
-reporting_options.add_argument('--dis-server-client-key', "-dsckey", required=True, action='store', type=str,
-                               default=os.environ.get('DIS_HIVEMON_DIS_API_CLIENT_KEY'), dest="dis_api_client_key",
-                               help="Specify the API key to use for submitting DIS FAST reports "
-                                    "(or DIS_HIVEMON_DIS_API_CLIENT_KEY)")
-reporting_options.add_argument('--report-store-dir', "-repd", required=False, action='store', type=str,
-                               default=os.environ.get('DIS_HIVEMON_REPORT_STORE_DIR'), dest="report_store_dir",
-                               help="Specify a directory to store generated Observed Forged Source Traffic Reports "
-                                    "reports (or DIS_HIVEMON_REPORT_STORE_DIR)")
-storage_format_choices=["file-per-report", "file-per-report-date-subdirs", "combined-report-file"]
-reporting_options.add_argument('--report-store-format', "-repf", required=False, action='store', type=str,
-                               default=os.environ.get('DIS_HIVEMON_REPORT_STORE_FORMAT', "file-per-report"),
-                               dest="report_store_format", choices=storage_format_choices,
-                               help="Specify the report options for writing Observed Forged Source Traffic Reports "
-                                    f"reports (or DIS_HIVEMON_REPORT_STORE_FORMAT). One of {storage_format_choices}")
+    arg_default = os.environ.get('DIS_HIVEMON_HIVE_URL')
+    hive_opt_group.add_argument('--hive-url', "-hu", required=not arg_default,
+                                action='store', type=str, default=arg_default,
+                                help="Specify the URL to the HIVE server to receive honeypot attack reports "
+                                     "(e.g. 'https://arbor001.acme.com') "
+                                     "(or set DIS_HIVEMON_HIVE_URL)")
+    hive_opt_group.add_argument('--hive-client-cert-file', "-ccf", required=False, action='store', type=open,
+                                default=os.environ.get('DIS_HIVEMON_HIVE_CLIENT_CERT_FILE'),
+                                help="the client cert file to use when connecting to the HIVE server"
+                                     "when an https HIVE URL is specified. Note that this will only "
+                                     "be used if/when the server requires client cert validation. "
+                                     "(or set DIS_HIVEMON_HIVE_CLIENT_CERT_FILE)")
+    hive_opt_group.add_argument('--hive-client-cert-key-file', "-cckf", required=False, action='store', type=open,
+                                default=os.environ.get('DIS_HIVEMON_HIVE_CLIENT_CERT_KEY_FILE'),
+                                help="the file containing the private key associated witn the public "
+                                     "key in the specified client cert when an https HIVE URL is "
+                                     "specified. Note that this will only be used if/when the server "
+                                     "requires client cert validation. (or set DIS_HIVEMON_HIVE_CLIENT_CERT_KEY_FILE)")
+    hive_opt_group.add_argument('--hive-ca-certs-file', "-caf", required=False, action='store', type=open,
+                                default=os.environ.get('DIS_HIVEMON_HIVE_CA_CERTS_FILE'),
+                                help="the file containing a list of CA certificates for validating the server"
+                                     "(or set DIS_HIVEMON_HIVE_CA_CERTS_FILE)")
+    hive_opt_group.add_argument('--hive-retry-interval', "-p", required=False, action='store', type=int,
+                                default = os.environ.get('DIS_HIVEMON_HIVE_URL_RETRY_S', 30),
+                                help="the retry interval for retrying the connection to the HIVE server"
+                                     "if/when the connection fails (or set DIS_HIVEMON_HIVE_URL_RETRY_S)")
+    hive_opt_group.add_argument('--hive-proxy-url', "-hpu", required=False, action='store', type=str,
+                                default=os.environ.get('DIS_HIVEMON_HIVE_PROXY',
+                                                       os.environ.get('HTTPS_PROXY', os.environ.get('HTTP_PROXY'))),
+                                help="Specify a proxy server to use to make the websocket connection to the HIVE server"
+                                     " (or set DIS_HIVEMON_HIVE_PROXY, HTTPS_PROXY or HTTP_PROXY environment variables)")
+    hive_opt_group.add_argument('--add-attack-entry', "-aae", required=False, action='append', type=str,
+                                dest='test_entries', default=[os.environ.get('DIS_HIVEMON_ATTACK_ENTRIES')],
+                                help="one or more attack entries of the form: "
+                                     "{'attackId': int, 'durationMinutes': int, 'srcNetwork': str, 'destPort':int} "
+                                     "(or DIS_HIVEMON_ATTACK_ENTRIES separated by ';')")
+    #
+    # ASN resolver options
+    #
+
+    # TODO: Add option to use Arbor to resolve ASNs
+    # TODO: Add options to ignore given ASNs, routers, and/or interface names/types
+    asn_lookup_options = arg_parser.add_argument_group(
+                             title="Options for determining an ASN from a router interface name or description",
+                             description="These options provide a variety of ways to map or extract "
+                                         "an ASN from an interface name or description - so the source "
+                                         "of captured traffic can be associated with an ASN.")
+    int_name_asn_regex = os.environ.get('DIS_HIVEMON_INT_NAME_ASN_REGEX')
+    int_name_lookup_filename = os.environ.get('DIS_HIVEMON_INT_NAME_LOOKUP_FILE')
+    int_desc_asn_regex = os.environ.get('DIS_HIVEMON_INT_DESC_ASN_REGEX')
+    int_desc_lookup_filename = os.environ.get('DIS_HIVEMON_INT_DESC_LOOKUP_FILE')
+    one_asn_method = int_name_asn_regex or int_name_lookup_filename or int_desc_asn_regex or int_desc_lookup_filename
+    ex_asn_group = asn_lookup_options.add_mutually_exclusive_group(required=not one_asn_method)
+    ex_asn_group.add_argument('--int-name-asn-regex', "-inameregex", required=False, action='store', type=str,
+                              default=int_name_asn_regex, dest="int_name_regex",
+                              help="Specify a regular expression that can be used to extract ASNs from "
+                                   "interface names (as group 1 of the regex) (or set DIS_HIVEMON_INT_NAME_ASN_REGEX)")
+    ex_asn_group.add_argument('--int-name-asn-lookup-file', "-inlfile", required=False, action='store', type=open,
+                              default=int_name_lookup_filename, dest="int_name_lookup_file",
+                              help="Specify the file containing a list of ruleset used to determine ASN names "
+                                   "from interface names (or set DIS_HIVEMON_INT_NAME_LOOKUP_FILE)")
+    ex_asn_group.add_argument('--int-desc-asn-regex', "-idescregex", required=False, action='store', type=str,
+                              default=int_desc_asn_regex, dest="int_desc_regex",
+                              help="Specify the regular expression to extract the ASN from the interface description "
+                                   "(or DIS_HIVEMON_INT_DESC_ASN_REGEX)")
+    ex_asn_group.add_argument('--int-desc-asn-lookup-file', "-idlfile", required=False, action='store', type=open,
+                              default=int_desc_lookup_filename, dest="int_desc_lookup_file",
+                              help="Specify the file containing a list of ruleset used to determine ASN names "
+                                   "from interface descriptions (or set DIS_HIVEMON_INT_DESC_LOOKUP_FILE)")
+    #
+    # Observed forged traffic report storing/forwarding options
+    #
+    reporting_options = arg_parser.add_argument_group(
+                             title="Options for the storing and forwarding of Forged Address Source Traffic Reports")
+    arg_default = os.environ.get('DIS_HIVEMON_DIS_API_PREFIX')
+    reporting_options.add_argument('--dis-server-api-prefix', "-dsuri", required=not arg_default, action='store', type=str,
+                                   default=arg_default, dest="dis_api_prefix",
+                                   help="Specify the API prefix of the DIS server to submit DIS Forged Address "
+                                        "Source Traceback (FAST) Reports (or DIS_HIVEMON_DIS_API_PREFIX)")
+    reporting_options.add_argument('--dis-server-http-proxy', "-dshp,", required=False, action='store',
+                                   type=str, dest="dis_api_http_proxy",
+                                   default=os.environ.get('DIS_HIVEMON_DIS_API_HTTP_PROXY'),
+                                   help="Specify the HTTP/HTTPS proxy URL for connecting to the DIS server "
+                                        "(or DIS_HIVEMON_DIS_API_HTTP_PROXY). e.g. 'http://10.0.1.11:1234'")
+    arg_default = os.environ.get('DIS_HIVEMON_DIS_API_CLIENT_KEY')
+    reporting_options.add_argument('--dis-server-client-key', "-dsckey", required=not arg_default, action='store', type=str,
+                                   default=arg_default, dest="dis_api_client_key",
+                                   help="Specify the API key to use for submitting DIS FAST reports "
+                                        "(or DIS_HIVEMON_DIS_API_CLIENT_KEY)")
+    reporting_options.add_argument('--report-store-dir', "-repd", required=False, action='store', type=str,
+                                   default=os.environ.get('DIS_HIVEMON_REPORT_STORE_DIR'), dest="report_store_dir",
+                                   help="Specify a directory to store generated Observed Forged Source Traffic Reports "
+                                        "reports (or DIS_HIVEMON_REPORT_STORE_DIR)")
+    storage_format_choices=["file-per-report", "file-per-report-date-subdirs", "combined-report-file"]
+    reporting_options.add_argument('--report-store-format', "-repf", required=False, action='store', type=str,
+                                   default=os.environ.get('DIS_HIVEMON_REPORT_STORE_FORMAT', "file-per-report"),
+                                   dest="report_store_format", choices=storage_format_choices,
+                                   help="Specify the report options for writing Observed Forged Source Traffic Reports "
+                                        f"reports (or DIS_HIVEMON_REPORT_STORE_FORMAT). One of {storage_format_choices}")
+    return arg_parser
+
+
+def set_env_variables_from_file(filepath):
+    try:
+        with open(filepath, 'r') as file:
+            linenum = 0
+            for line in file:
+                linenum += 1
+                print(f"Looking at line: {line.strip()}")
+                # Strip leading/trailing whitespace
+                line = line.strip()
+                # Skip empty lines and comments
+                if not line or line.startswith("#"):
+                    continue
+                # Split the line into name and value at the first '='
+                if '=' in line:
+                    name, value = line.split('=', 1)
+                    value = value.strip()
+                    if value and (value[0] == "'" or value[0] == '"'):
+                        if value[-1] == value[0]:
+                            value = value[1:-1]
+                        else:
+                            print(f"Error on line {linenum}: Quotes are not balanced")
+                    if value:
+                        # Set as an environment variable
+                        os.environ[name.strip()] = value
+    except FileNotFoundError:
+        print(f"Error: File '{filepath}' not found.")
+        sys.exit(1)
+    except Exception as e:
+        print(f"Error: {e}")
+        sys.exit(1)
+
+logging_filename = None
+logging_filemode = None
+logging.basicConfig(level=logging.INFO, filename=logging_filename, filemode=logging_filemode,
+                    format='%(asctime)s %(name)s: %(levelname)s %(message)s')
+logger = logging.getLogger("DIS HIVEMON")
+
+conf_filename = sys.argv[1] if len(sys.argv) == 2 else None
+
+if conf_filename:
+    logger.info(f"Reading configuration variables from file {conf_filename}")
+    try:
+        set_env_variables_from_file(conf_filename)
+    except Exception as ex:
+        logger.warning(f"Error reading conf file {conf_filename}: {ex}", exc_info=True)
+
+arg_parser = init_argparser()
 
 # TODO: Make this selectable
 enabled_traffic_monitor_class = ArborWsApiTrafficMonitor
@@ -179,12 +242,8 @@ enabled_traffic_monitor_class.add_supported_arguments(arg_parser)
 
 args = arg_parser.parse_args()
 
-logging_filename = None
-logging_filemode = None
-logging.basicConfig(level=(logging.DEBUG if args.debug else logging.INFO),
-                    filename=logging_filename, filemode=logging_filemode,
-                    format='%(asctime)s %(name)s: %(levelname)s %(message)s')
-logger = logging.getLogger("DIS HIVEMON")
+if args.debug:
+    logger.setLevel(logging.DEBUG)
 
 # Log all arguments except sensitive values
 redacted_args = ["report_consumer_api_key"] + enabled_traffic_monitor_class.get_redacted_args()
@@ -248,7 +307,7 @@ async def main():
         await capture_monitor.startup(event_loop)
         await hive_monitor.startup(event_loop)
     except Exception as ex:
-        logger.error(f"Caught exception on startup: {ex}")
+        logger.error(f"Caught exception on startup: {ex}", exc_info=True)
         exit(1)
 
 if __name__ == "__main__":

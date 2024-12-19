@@ -18,7 +18,7 @@ class ReportJsonEncoder(json.JSONEncoder):
 class DisReportUploader:
     def __init__(self, args, base_logger):
         self.event_loop = None
-        self.dis_api_base_url = args.dis_api_uri
+        self.dis_api_base_url = args.dis_api_prefix
         self.dis_api_client_key = args.dis_api_client_key
         self.dis_api_http_proxy = args.dis_api_http_proxy
         self.report_uploader_task = None

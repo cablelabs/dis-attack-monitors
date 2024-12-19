@@ -16,6 +16,7 @@ from websockets import ConnectionClosed
 
 class HiveMonitor:
     def __init__(self, args, logger):
+        self.logger = logging.getLogger(logger.name + ":HIVE Monitor")
         self.event_loop = None
         self.captureMonitors = []
         self.websocket = None
@@ -25,11 +26,10 @@ class HiveMonitor:
         self.hive_client_cert_key_file = args.hive_client_cert_file
         self.hive_ca_certs_file = args.hive_ca_certs_file
         self.hive_retry_interval = args.hive_retry_interval
-        self.dump_list_updates = args.dump_list_updates
+        self.log_list_updates = args.log_list_updates
         self.test_entries = args.test_entries
         self.active_attacks_dict = {}
         self.add_test_attacks()
-        self.logger = logging.getLogger(logger.name + ":HIVE Monitor")
         self.hive_client_cert_file = args.hive_client_cert_file
         self.logger.info(f"Initialized with \n{pprint.pformat(self.__dict__)}")
         self.print_ex_backtraces = True
@@ -85,7 +85,7 @@ class HiveMonitor:
                 ws_context = websockets.connect(self.hive_url, ssl=ssl_context)
         except Exception as Ex:
             self.logger.info(f"Caught an exception creating connection to {self.hive_url}"
-                        f"{' via proxy ' + self.hive_proxy_url if self.hive_proxy_url else ''}: {Ex}")
+                             f"{' via proxy ' + self.hive_proxy_url if self.hive_proxy_url else ''}: {Ex}")
             exit(-1)
 
         event_loop = asyncio.get_event_loop()
@@ -146,7 +146,7 @@ class HiveMonitor:
             self.logger.warning(f"process_hive_message: Caught an exception processing message {hive_message}: {Ex}",
                                 exc_info=self.print_ex_backtraces)
         finally:
-            if self.dump_list_updates:
+            if self.log_list_updates:
                 self.dump_attack_entries()
 
     async def perform_periodic_connection_reports(self, report_status_interval_s):
