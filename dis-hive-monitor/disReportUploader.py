@@ -24,7 +24,7 @@ class DisReportUploader:
         self.report_uploader_task = None
         self.report_queue = []
         self.report_ready = Event()
-        self.upload_retry_time_s = 120 # 2 minutes
+        self.upload_retry_time_s = 120  # 2 minutes
         self.print_ex_backtraces = True
         self.logger = logging.getLogger(base_logger.name + " DIS-FAST Uploader")
         self.logger.debug(f"Initialized with \n{pprint.pformat(self.__dict__)}")

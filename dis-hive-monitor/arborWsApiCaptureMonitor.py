@@ -363,7 +363,7 @@ class ArborWsApiTrafficMonitor(TrafficMonitorBase):
                         result = await interface_query.run_query(http_session, routers=[router_gid])
                         ints_for_router = interface_query.get_interface_metadata(asn_resolver=self.asn_resolver)
                         self.logger.info(f"_periodic_router_metadata_collector: RETRIEVED list of "
-                                         f"{len(ints_for_router.get('router_gid',[]))} interfaces for "
+                                         f"{len(ints_for_router.get(router_gid,[]))} interfaces for "
                                          f"router {router_gid} in {time.time()-tb:.1f}s")
                         self.logger.debug(f"_periodic_router_metadata_collector: Interfaces for router "
                                           f"{router_gid}:\n{pprint.pformat(ints_for_router)}")

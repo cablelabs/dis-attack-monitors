@@ -21,6 +21,7 @@ from hiveMonitor import HiveMonitor
 from localFileReportWriter import LocalFileReportWriter
 from disReportUploader import DisReportUploader
 
+
 def init_argparser():
     arg_parser = argparse.ArgumentParser(description='Connects to the HIVE server and performs local scanning '
                                                      'for ongoing forged attack traffic signalled by the HIVE server. '
@@ -31,8 +32,7 @@ def init_argparser():
     #
     # General options
     #
-    arg_parser.add_argument('conf_file',
-                            help="Set conf file")
+    arg_parser.add_argument('conf_file', nargs="?", help="Set conf file")
     arg_parser.add_argument('--debug', '-d', required=False, action='store_true',
                             default=os.environ.get('DIS_HIVEMON_DEBUG', False),
                             help="Enable debug output/checks (or DIS_HIVEMON_DEBUG)")
@@ -89,8 +89,7 @@ def init_argparser():
     hive_opt_group.add_argument('--hive-url', "-hu", required=not arg_default,
                                 action='store', type=str, default=arg_default,
                                 help="Specify the URL to the HIVE server to receive honeypot attack reports "
-                                     "(e.g. 'https://arbor001.acme.com') "
-                                     "(or set DIS_HIVEMON_HIVE_URL)")
+                                     "(e.g. 'https://arbor001.acme.com') (or set DIS_HIVEMON_HIVE_URL)")
     hive_opt_group.add_argument('--hive-client-cert-file', "-ccf", required=False, action='store', type=open,
                                 default=os.environ.get('DIS_HIVEMON_HIVE_CLIENT_CERT_FILE'),
                                 help="the client cert file to use when connecting to the HIVE server"
@@ -116,8 +115,9 @@ def init_argparser():
                                                        os.environ.get('HTTPS_PROXY', os.environ.get('HTTP_PROXY'))),
                                 help="Specify a proxy server to use to make the websocket connection to the HIVE server"
                                      " (or set DIS_HIVEMON_HIVE_PROXY, HTTPS_PROXY or HTTP_PROXY environment variables)")
+    arg_default = os.environ.get('DIS_HIVEMON_ATTACK_ENTRIES')
     hive_opt_group.add_argument('--add-attack-entry', "-aae", required=False, action='append', type=str,
-                                dest='test_entries', default=[os.environ.get('DIS_HIVEMON_ATTACK_ENTRIES')],
+                                dest='test_entries', default=[arg_default] if arg_default else None,
                                 help="one or more attack entries of the form: "
                                      "{'attackId': int, 'durationMinutes': int, 'srcNetwork': str, 'destPort':int} "
                                      "(or DIS_HIVEMON_ATTACK_ENTRIES separated by ';')")
@@ -272,6 +272,7 @@ async def on_forged_traffic_found(report_list):
     if dis_report_uploader:
         logger.info(f"Uploading {len(report_list)} reports to DIS")
         await dis_report_uploader.queue_reports_for_upload(report_list)
+
 
 def make_redacted_report(report):
     redacted_report = copy.deepcopy(report)
